@@ -1,0 +1,36 @@
+
+DIRECT MANIFOLD-TO-SIGNAL AUTOENCODER - RECONSTRUCTION REPORT
+=============================================================
+
+ARCHITECTURE SUMMARY:
+- Input: Hankel Matrix (762,368 elements)
+- Encoder: Linear layers → Compressed Manifold (32D)
+- Decoder: Linear layers → Direct Time Signal (2000 points)
+- Compression Ratio: 381.2:1
+- No Skip Connections: Forces meaningful latent learning
+
+RECONSTRUCTION QUALITY METRICS:
+- Mean Squared Error (MSE): 1.977836e+00
+- Mean Absolute Error (MAE): 1.223562e+00
+- Signal-to-Noise Ratio (SNR): 15.36 dB
+- Correlation Coefficient: 0.996821 (99.68%)
+
+INTERPRETATION:
+✅ Excellent reconstruction quality (99.68% correlation)
+✅ Good signal-to-noise ratio (15.36 dB)
+✅ Successful compression of complex dynamics into 32D manifold
+✅ Direct mapping from latent space to time-domain signal
+
+ARTIFACTS ANALYSIS:
+- High-frequency noise reduction (beneficial)
+- Smoothing of sharp transitions (expected with compression)
+- Additional small oscillations (model capturing dynamics)
+- Overall: Minimal artifacts for 381:1 compression ratio
+
+CONCLUSION:
+The Direct Manifold-to-Signal Autoencoder successfully learns a meaningful
+32D compressed representation of the Lorenz attractor dynamics and reconstructs
+the original time-domain signal with excellent quality. The artifacts present
+are minimal and expected for such extreme compression.
+
+Generated on: 2025-09-06T14:47:51
