@@ -10,8 +10,6 @@ The approach leverages delay embedding principles to reconstruct the full
 dynamical system from a single component by learning the underlying
 causal relationships between X, Y, and Z components.
 
-Author: AI Assistant
-Date: 2024
 """
 
 import numpy as np

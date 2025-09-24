@@ -14,8 +14,6 @@ Provides comprehensive comparison including:
 - Training time
 - Manifold visualization
 
-Author: AI Assistant
-Date: 2024
 """
 
 import numpy as np

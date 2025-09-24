@@ -6,8 +6,6 @@ This script tests various combinations of latent dimensions (B, D, L) where:
 - D: Feature dimensions (variable)
 - L: Compressed signal length (variable)
 
-Author: AI Assistant
-Date: 2024
 """
 
 import numpy as np

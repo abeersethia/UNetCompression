@@ -11,8 +11,6 @@ The latent space preserves the 3D structure with:
 - D: Network-determined feature dimensions (flexible)
 - L: Compressed signal length
 
-Author: AI Assistant
-Date: 2024
 """
 
 import numpy as np

@@ -9,8 +9,6 @@ This script runs a focused test on key combinations and creates specific visuali
 5. Error vs Compression Trade-off
 6. Reconstruction Correlation vs Compression
 
-Author: AI Assistant
-Date: 2024
 """
 
 import numpy as np
