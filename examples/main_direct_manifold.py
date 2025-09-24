@@ -8,8 +8,12 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 from direct_manifold_model import DirectManifoldAutoencoder
-from hankel_dataset import HankelMatrixDataset
-from lorenz import generate_lorenz_full
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.core.hankel_dataset import HankelMatrixDataset
+from src.core.lorenz import generate_lorenz_full
 from direct_manifold_training import train_direct_manifold_model, reconstruct_direct_signal
 
 

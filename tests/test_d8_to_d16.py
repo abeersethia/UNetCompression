@@ -12,14 +12,16 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from lorenz import generate_lorenz_full
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from src.core.lorenz import generate_lorenz_full
+from src.architectures.x_only_manifold_reconstruction_corrected import XOnlyManifoldReconstructorCorrected
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
 import time
-
-# Import the corrected reconstructor
-from x_only_manifold_reconstruction_corrected import XOnlyManifoldReconstructorCorrected
 
 def test_latent_combination(latent_d, latent_l, max_epochs=80, verbose=False):
     """

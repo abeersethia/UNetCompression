@@ -1,12 +1,12 @@
 """
-X-Only Manifold Reconstruction using CausalAE (Causal Autoencoder)
+X-Only Manifold Reconstruction using EDGeNet
 
-This file implements X-only manifold reconstruction with a 
-Causal Autoencoder architecture for respecting temporal causality.
+This file implements X-only manifold reconstruction with the 
+EDGeNet (Enhanced Dynamic Graph Edge Network) architecture.
 
 Based on: x_only_manifold_reconstruction_corrected.py
-Architecture: CausalAE (Causal Autoencoder)
-Reference: https://github.com/williamgilpin/fnn/blob/master/fnn/networks.py
+Architecture: EDGeNet
+Reference: https://github.com/dipayandewan94/EDGeNet/blob/main/EDGeNet.py
 """
 
 import numpy as np
@@ -15,8 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from lorenz import generate_lorenz_full
+from ..core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from ..core.lorenz import generate_lorenz_full
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
 import time
@@ -25,44 +25,111 @@ def count_parameters(model):
     """Count the number of trainable parameters in a model"""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def estimate_causal_flops(model, input_shape):
-    """Estimate FLOPs for Causal CNN model"""
+def estimate_edgenet_flops(model, input_shape):
+    """Estimate FLOPs for EDGeNet model"""
     total_flops = 0
     for layer in model.modules():
         if isinstance(layer, nn.Conv1d):
-            # FLOPs = output_size * kernel_size * input_channels * output_channels
             kernel_size = layer.kernel_size[0]
             in_channels = layer.in_channels
             out_channels = layer.out_channels
-            # Approximate output size (assuming same padding)
-            output_size = input_shape[-1]  # temporal dimension
+            output_size = input_shape[-1]
             total_flops += output_size * kernel_size * in_channels * out_channels * 2
         elif isinstance(layer, nn.Linear):
             total_flops += layer.in_features * layer.out_features * 2
+        elif isinstance(layer, nn.MultiheadAttention):
+            # Simplified attention FLOPs estimation
+            d_model = layer.embed_dim
+            seq_len = input_shape[-1]
+            total_flops += 4 * d_model * seq_len * seq_len  # Q, K, V, and output projections
     return total_flops
 
-class CausalConv1d(nn.Module):
-    """Causal 1D Convolution that respects temporal causality"""
-    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
+class GraphAttentionLayer(nn.Module):
+    """Graph Attention Layer for capturing dynamic relationships"""
+    def __init__(self, in_features, out_features, num_heads=4, dropout=0.3):
         super().__init__()
-        self.kernel_size = kernel_size
-        self.dilation = dilation
-        self.padding = (kernel_size - 1) * dilation
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_heads = num_heads
         
-        self.conv = nn.Conv1d(
-            in_channels, out_channels, kernel_size,
-            padding=self.padding, dilation=dilation
+        # Multi-head attention
+        self.attention = nn.MultiheadAttention(
+            embed_dim=in_features,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
         )
         
+        # Layer normalization
+        self.layer_norm = nn.LayerNorm(in_features)
+        
+        # Feed-forward network - ensure output matches out_features
+        self.ffn = nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(out_features, out_features)
+        )
+        
+        # Projection layer to match output dimensions
+        self.output_proj = nn.Linear(in_features, out_features) if in_features != out_features else nn.Identity()
+        
+        self.dropout = nn.Dropout(dropout)
+        
     def forward(self, x):
-        x = self.conv(x)
-        # Remove future information by trimming the end
-        if self.padding > 0:
-            x = x[:, :, :-self.padding]
+        # x shape: (B, L, D) for attention
+        residual = x
+        
+        # Multi-head attention
+        attn_output, _ = self.attention(x, x, x)
+        x = self.layer_norm(residual + self.dropout(attn_output))
+        
+        # Feed-forward network
+        residual = self.output_proj(x)  # Project residual to match output dims
+        x = self.ffn(x)
+        x = residual + self.dropout(x)
+        
         return x
 
-class CausalEncoder(nn.Module):
-    """Causal Encoder using causal convolutions"""
+class DynamicGraphConv(nn.Module):
+    """Dynamic Graph Convolution with adaptive edge weights"""
+    def __init__(self, in_channels, out_channels, kernel_size=3):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        
+        # Edge weight generation
+        self.edge_weight_gen = nn.Sequential(
+            nn.Conv1d(in_channels, in_channels // 2, 1),
+            nn.ReLU(),
+            nn.Conv1d(in_channels // 2, 1, 1),
+            nn.Sigmoid()
+        )
+        
+        # Main convolution
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size//2)
+        
+        # Batch normalization
+        self.bn = nn.BatchNorm1d(out_channels)
+        
+    def forward(self, x):
+        # x shape: (B, D, L)
+        
+        # Generate dynamic edge weights
+        edge_weights = self.edge_weight_gen(x)  # (B, 1, L)
+        
+        # Apply edge weights
+        x_weighted = x * edge_weights
+        
+        # Convolution
+        x = self.conv(x_weighted)
+        x = self.bn(x)
+        x = F.relu(x)
+        
+        return x
+
+class EDGeNetEncoder(nn.Module):
+    """Simplified EDGeNet Encoder for EEG denoising"""
     def __init__(self, input_d, input_l, latent_d, latent_l):
         super().__init__()
         self.input_d = input_d
@@ -70,46 +137,72 @@ class CausalEncoder(nn.Module):
         self.latent_d = latent_d
         self.latent_l = latent_l
         
-        # Causal convolutional layers with increasing dilation
-        self.causal_conv1 = CausalConv1d(input_d, 32, kernel_size=3, dilation=1)
-        self.causal_conv2 = CausalConv1d(32, 64, kernel_size=3, dilation=2)
-        self.causal_conv3 = CausalConv1d(64, 128, kernel_size=3, dilation=4)
-        self.causal_conv4 = CausalConv1d(128, latent_d, kernel_size=3, dilation=8)
+        # EEG-specific preprocessing layers
+        self.preprocess = nn.Sequential(
+            nn.Conv1d(input_d, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(0.2)
+        )
         
-        # Batch normalization and dropout
-        self.bn1 = nn.BatchNorm1d(32)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(128)
-        self.bn4 = nn.BatchNorm1d(latent_d)
+        # Multi-scale feature extraction (common in EEG processing)
+        self.conv1 = nn.Conv1d(32, 64, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=3, padding=1)
         
-        self.dropout = nn.Dropout(0.3)
+        # Batch normalization layers
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(256)
+        
+        # Attention mechanism for EEG artifacts
+        self.attention = nn.MultiheadAttention(
+            embed_dim=256,
+            num_heads=8,
+            dropout=0.3,
+            batch_first=True
+        )
+        
+        # Output projection
+        self.output_proj = nn.Conv1d(256, latent_d, kernel_size=1)
         
         # Temporal compression
         self.temporal_compress = nn.AdaptiveAvgPool1d(latent_l)
         
+        self.dropout = nn.Dropout(0.3)
+        
     def forward(self, x):
         # x shape: (B, D, L)
         
-        # Causal convolution layers
-        x = F.relu(self.bn1(self.causal_conv1(x)))
+        # Preprocessing
+        x = self.preprocess(x)  # (B, 32, L)
+        
+        # Multi-scale convolutions
+        x = F.relu(self.bn1(self.conv1(x)))  # (B, 64, L)
         x = self.dropout(x)
         
-        x = F.relu(self.bn2(self.causal_conv2(x)))
+        x = F.relu(self.bn2(self.conv2(x)))  # (B, 128, L)
         x = self.dropout(x)
         
-        x = F.relu(self.bn3(self.causal_conv3(x)))
+        x = F.relu(self.bn3(self.conv3(x)))  # (B, 256, L)
         x = self.dropout(x)
         
-        x = F.relu(self.bn4(self.causal_conv4(x)))
-        x = self.dropout(x)
+        # Attention mechanism (transpose for attention)
+        x_attn = x.transpose(1, 2)  # (B, L, 256)
+        attn_output, _ = self.attention(x_attn, x_attn, x_attn)
+        x_attn = x_attn + attn_output  # Residual connection
+        x = x_attn.transpose(1, 2)  # (B, 256, L)
+        
+        # Output projection
+        x = self.output_proj(x)  # (B, latent_d, L)
         
         # Temporal compression
         x = self.temporal_compress(x)  # (B, latent_d, latent_l)
         
         return x
 
-class CausalDecoder(nn.Module):
-    """Causal Decoder using transposed causal convolutions"""
+class EDGeNetDecoder(nn.Module):
+    """Simplified EDGeNet Decoder for EEG reconstruction"""
     def __init__(self, latent_d, latent_l, output_d, output_l):
         super().__init__()
         self.latent_d = latent_d
@@ -120,16 +213,29 @@ class CausalDecoder(nn.Module):
         # Temporal expansion
         self.temporal_expand = nn.Upsample(size=output_l, mode='linear', align_corners=False)
         
-        # Causal transposed convolutions
-        self.causal_deconv1 = CausalConv1d(latent_d, 128, kernel_size=3, dilation=8)
-        self.causal_deconv2 = CausalConv1d(128, 64, kernel_size=3, dilation=4)
-        self.causal_deconv3 = CausalConv1d(64, 32, kernel_size=3, dilation=2)
-        self.causal_deconv4 = CausalConv1d(32, output_d, kernel_size=3, dilation=1)
+        # Input projection
+        self.input_proj = nn.Conv1d(latent_d, 256, kernel_size=1)
         
-        # Batch normalization and dropout
+        # Attention mechanism (reverse)
+        self.attention = nn.MultiheadAttention(
+            embed_dim=256,
+            num_heads=8,
+            dropout=0.3,
+            batch_first=True
+        )
+        
+        # Multi-scale deconvolutions (reverse of encoder)
+        self.deconv1 = nn.ConvTranspose1d(256, 128, kernel_size=3, padding=1)
+        self.deconv2 = nn.ConvTranspose1d(128, 64, kernel_size=3, padding=1)
+        self.deconv3 = nn.ConvTranspose1d(64, 32, kernel_size=5, padding=2)
+        
+        # Batch normalization layers
         self.bn1 = nn.BatchNorm1d(128)
         self.bn2 = nn.BatchNorm1d(64)
         self.bn3 = nn.BatchNorm1d(32)
+        
+        # Output layer
+        self.output_layer = nn.Conv1d(32, output_d, kernel_size=3, padding=1)
         
         self.dropout = nn.Dropout(0.3)
         
@@ -139,22 +245,32 @@ class CausalDecoder(nn.Module):
         # Temporal expansion
         x = self.temporal_expand(x)  # (B, latent_d, output_l)
         
-        # Causal deconvolution layers
-        x = F.relu(self.bn1(self.causal_deconv1(x)))
+        # Input projection
+        x = F.relu(self.input_proj(x))  # (B, 256, output_l)
+        
+        # Attention mechanism (transpose for attention)
+        x_attn = x.transpose(1, 2)  # (B, output_l, 256)
+        attn_output, _ = self.attention(x_attn, x_attn, x_attn)
+        x_attn = x_attn + attn_output  # Residual connection
+        x = x_attn.transpose(1, 2)  # (B, 256, output_l)
+        
+        # Multi-scale deconvolutions
+        x = F.relu(self.bn1(self.deconv1(x)))  # (B, 128, output_l)
         x = self.dropout(x)
         
-        x = F.relu(self.bn2(self.causal_deconv2(x)))
+        x = F.relu(self.bn2(self.deconv2(x)))  # (B, 64, output_l)
         x = self.dropout(x)
         
-        x = F.relu(self.bn3(self.causal_deconv3(x)))
+        x = F.relu(self.bn3(self.deconv3(x)))  # (B, 32, output_l)
         x = self.dropout(x)
         
-        x = self.causal_deconv4(x)  # (B, output_d, output_l)
+        # Output layer
+        x = self.output_layer(x)  # (B, output_d, output_l)
         
         return x
 
-class XOnlyManifoldReconstructorCausalAE:
-    """X-Only Manifold Reconstructor using CausalAE architecture"""
+class XOnlyManifoldReconstructorEDGeNet:
+    """X-Only Manifold Reconstructor using EDGeNet architecture"""
     
     def __init__(self, window_len=512, delay_embedding_dim=10, stride=5, 
                  latent_d=32, latent_l=128, train_split=0.7):
@@ -171,16 +287,16 @@ class XOnlyManifoldReconstructorCausalAE:
         self.dataset_y = None
         self.dataset_z = None
         
-    def create_causal_autoencoder(self):
-        """Create CausalAE autoencoder architecture"""
-        encoder = CausalEncoder(
+    def create_edgenet_autoencoder(self):
+        """Create EDGeNet autoencoder architecture"""
+        encoder = EDGeNetEncoder(
             input_d=self.delay_embedding_dim,
             input_l=self.window_len,
             latent_d=self.latent_d,
             latent_l=self.latent_l
         )
         
-        decoder = CausalDecoder(
+        decoder = EDGeNetDecoder(
             latent_d=self.latent_d,
             latent_l=self.latent_l,
             output_d=3 * self.delay_embedding_dim,
@@ -255,24 +371,24 @@ class XOnlyManifoldReconstructorCausalAE:
         return base_std * (epoch / max_epochs) + 0.01
     
     def train(self, max_epochs=150, base_noise_std=0.1, patience=25, verbose=True):
-        """Train the CausalAE autoencoder"""
+        """Train the EDGeNet autoencoder"""
         if self.input_data is None:
             raise ValueError("Data not prepared. Call prepare_data first.")
         
-        print(f"\n=== TRAINING CAUSAL AUTOENCODER ===")
-        print(f"Architecture: Causal Autoencoder (Causal CNN)")
+        print(f"\n=== TRAINING EDGENET AUTOENCODER ===")
+        print(f"Architecture: Enhanced Dynamic Graph Edge Network (EEG Denoising)")
         print(f"Input: X component only")
         print(f"Output: Full attractor (X, Y, Z)")
         print(f"Latent shape: (B, {self.latent_d}, {self.latent_l})")
-        print(f"Causality: Respects temporal ordering")
+        print(f"Features: Multi-scale convolutions + Multi-head attention")
         
         # Create autoencoder
-        self.encoder, self.decoder = self.create_causal_autoencoder()
+        self.encoder, self.decoder = self.create_edgenet_autoencoder()
         
         # Print model statistics
         total_params = count_parameters(self.encoder) + count_parameters(self.decoder)
         input_shape = (1, self.delay_embedding_dim, self.window_len)
-        total_flops = estimate_causal_flops(self.encoder, input_shape) + estimate_causal_flops(self.decoder, (1, self.latent_d, self.latent_l))
+        total_flops = estimate_edgenet_flops(self.encoder, input_shape) + estimate_edgenet_flops(self.decoder, (1, self.latent_d, self.latent_l))
         
         print(f"Model Statistics:")
         print(f"  Encoder parameters: {count_parameters(self.encoder):,}")
@@ -289,7 +405,7 @@ class XOnlyManifoldReconstructorCausalAE:
         # Setup training
         optimizer = torch.optim.AdamW(
             list(self.encoder.parameters()) + list(self.decoder.parameters()), 
-            lr=1e-3, weight_decay=1e-3
+            lr=5e-4, weight_decay=1e-3
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5, patience=10
@@ -377,7 +493,7 @@ class XOnlyManifoldReconstructorCausalAE:
         if self.encoder is None or self.decoder is None:
             raise ValueError("Model not trained. Call train first.")
         
-        print(f"\n=== RECONSTRUCTING MANIFOLD (CAUSAL AE) ===")
+        print(f"\n=== RECONSTRUCTING MANIFOLD (EDGENET) ===")
         
         # Get reconstructed data for all data
         with torch.no_grad():
@@ -456,8 +572,8 @@ class XOnlyManifoldReconstructorCausalAE:
         return original_attractor, reconstructed_attractor, metrics
     
     def visualize_results(self, original_attractor, reconstructed_attractor, metrics, save_path=None):
-        """Create visualization of CausalAE results"""
-        print(f"\n=== CREATING CAUSAL AE VISUALIZATION ===")
+        """Create visualization of EDGeNet results"""
+        print(f"\n=== CREATING EDGENET VISUALIZATION ===")
         
         # Create time vector
         t = np.linspace(0, 20.0, len(original_attractor))
@@ -473,25 +589,25 @@ class XOnlyManifoldReconstructorCausalAE:
         ax1.set_zlabel('Z')
         ax1.set_title('Original Lorenz Attractor\n(3D)', fontsize=12)
         
-        # 2. CausalAE Reconstructed Manifold (3D)
+        # 2. EDGeNet Reconstructed Manifold (3D)
         ax2 = fig.add_subplot(2, 3, 2, projection='3d')
         ax2.plot(reconstructed_attractor[:, 0], reconstructed_attractor[:, 1], reconstructed_attractor[:, 2], 
-                 alpha=0.8, linewidth=1, color='red', label='CausalAE Reconstructed')
+                 alpha=0.8, linewidth=1, color='red', label='EDGeNet Reconstructed')
         ax2.set_xlabel('X')
         ax2.set_ylabel('Y')
         ax2.set_zlabel('Z')
-        ax2.set_title('CausalAE Reconstructed Manifold\n(3D)', fontsize=12)
+        ax2.set_title('EDGeNet Reconstructed Manifold\n(3D)', fontsize=12)
         
         # 3. Overlay Comparison
         ax3 = fig.add_subplot(2, 3, 3, projection='3d')
         ax3.plot(original_attractor[:, 0], original_attractor[:, 1], original_attractor[:, 2], 
                  alpha=0.6, linewidth=1, color='blue', label='Original')
         ax3.plot(reconstructed_attractor[:, 0], reconstructed_attractor[:, 1], reconstructed_attractor[:, 2], 
-                 alpha=0.8, linewidth=1, color='red', label='CausalAE Reconstructed')
+                 alpha=0.8, linewidth=1, color='red', label='EDGeNet Reconstructed')
         ax3.set_xlabel('X')
         ax3.set_ylabel('Y')
         ax3.set_zlabel('Z')
-        ax3.set_title('CausalAE Overlay Comparison', fontsize=12)
+        ax3.set_title('EDGeNet Overlay Comparison', fontsize=12)
         ax3.legend()
         
         # 4. Correlation Analysis
@@ -502,7 +618,7 @@ class XOnlyManifoldReconstructorCausalAE:
         
         bars = ax4.bar(components, correlations, color=colors, alpha=0.7)
         ax4.set_ylabel('Correlation')
-        ax4.set_title('CausalAE Component Correlations', fontsize=12)
+        ax4.set_title('EDGeNet Component Correlations', fontsize=12)
         ax4.set_ylim(0, 1)
         ax4.grid(True, alpha=0.3)
         
@@ -516,15 +632,15 @@ class XOnlyManifoldReconstructorCausalAE:
         ax5.plot(t, metrics['error_3d'], alpha=0.8, linewidth=1, color='red')
         ax5.set_xlabel('Time')
         ax5.set_ylabel('Reconstruction Error')
-        ax5.set_title('CausalAE Error Evolution', fontsize=12)
+        ax5.set_title('EDGeNet Error Evolution', fontsize=12)
         ax5.grid(True, alpha=0.3)
         
         # 6. Performance Summary
         ax6 = fig.add_subplot(2, 3, 6)
         ax6.axis('off')
-        summary_text = f'''CAUSAL AUTOENCODER RESULTS:
+        summary_text = f'''EDGENET AUTOENCODER RESULTS:
 
-ARCHITECTURE: Causal CNN
+ARCHITECTURE: Enhanced Dynamic Graph Edge Network (EEG)
 PARAMETERS: {self.training_history['total_parameters']:,}
 FLOPS: {self.training_history['estimated_flops']:,}
 
@@ -544,34 +660,35 @@ Features: {self.delay_embedding_dim} → {self.latent_d}
 
 LATENT SHAPE: ({self.input_data.shape[0]}, {self.latent_d}, {self.latent_l})
 
-CAUSAL PROPERTIES:
-✓ Respects temporal causality
-✓ Dilated convolutions (1,2,4,8)
-✓ No future information leakage'''
+EDGENET FEATURES:
+✓ Multi-scale convolutions (5,3,3 kernels)
+✓ Multi-head attention (8 heads)
+✓ EEG-specific preprocessing
+✓ Residual connections'''
         
         ax6.text(0.05, 0.95, summary_text, transform=ax6.transAxes, fontsize=10,
                   verticalalignment='top', fontfamily='monospace',
-                  bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+                  bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
         
         plt.tight_layout()
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"CausalAE visualization saved to: {save_path}")
+            print(f"EDGeNet visualization saved to: {save_path}")
         
         plt.show()
         
         return fig
 
 def main():
-    """Main function for CausalAE autoencoder testing"""
-    print("=== X-ONLY MANIFOLD RECONSTRUCTION (CAUSAL AUTOENCODER) ===")
+    """Main function for EDGeNet autoencoder testing"""
+    print("=== X-ONLY MANIFOLD RECONSTRUCTION (EDGENET) ===")
     
     # Generate Lorenz attractor
     traj, t = generate_lorenz_full(T=20.0, dt=0.01)
     
-    # Create CausalAE reconstructor
-    reconstructor = XOnlyManifoldReconstructorCausalAE(
+    # Create EDGeNet reconstructor
+    reconstructor = XOnlyManifoldReconstructorEDGeNet(
         window_len=512,
         delay_embedding_dim=10,
         stride=5,
@@ -590,19 +707,19 @@ def main():
     # Visualize results
     fig = reconstructor.visualize_results(
         original_attractor, reconstructed_attractor, metrics,
-        save_path='causalae_manifold_reconstruction.png'
+        save_path='edgenet_manifold_reconstruction.png'
     )
     
     # Print final results
-    print(f"\n=== CAUSAL AUTOENCODER SUMMARY ===")
-    print(f"✅ Architecture: Causal Autoencoder (Causal CNN)")
+    print(f"\n=== EDGENET AUTOENCODER SUMMARY ===")
+    print(f"✅ Architecture: Enhanced Dynamic Graph Edge Network (EEG Denoising)")
     print(f"📊 Parameters: {training_history['total_parameters']:,}")
     print(f"⚡ FLOPs: {training_history['estimated_flops']:,}")
     print(f"🔗 X correlation: {metrics['correlations']['X']:.4f}")
     print(f"🔗 Y correlation: {metrics['correlations']['Y']:.4f}")
     print(f"🔗 Z correlation: {metrics['correlations']['Z']:.4f}")
     print(f"📈 Mean error: {metrics['mean_error']:.4f}")
-    print(f"⏰ Temporal causality: Respected")
+    print(f"🧠 EEG features: Multi-scale convolutions + Multi-head attention")
     
     return reconstructor, original_attractor, reconstructed_attractor, metrics
 

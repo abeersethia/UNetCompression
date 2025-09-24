@@ -22,12 +22,16 @@ from mpl_toolkits.mplot3d import Axes3D
 import time
 import pandas as pd
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Import all architectures
-from x_only_manifold_reconstruction_mlp import XOnlyManifoldReconstructorMLP
-from x_only_manifold_reconstruction_lstm import XOnlyManifoldReconstructorLSTM
-from x_only_manifold_reconstruction_causalae import XOnlyManifoldReconstructorCausalAE
-from x_only_manifold_reconstruction_edgenet import XOnlyManifoldReconstructorEDGeNet
-from lorenz import generate_lorenz_full
+from src.architectures.x_only_manifold_reconstruction_mlp import XOnlyManifoldReconstructorMLP
+from src.architectures.x_only_manifold_reconstruction_lstm import XOnlyManifoldReconstructorLSTM
+from src.architectures.x_only_manifold_reconstruction_causalae import XOnlyManifoldReconstructorCausalAE
+from src.architectures.x_only_manifold_reconstruction_edgenet import XOnlyManifoldReconstructorEDGeNet
+from src.core.lorenz import generate_lorenz_full
 
 def run_architecture_comparison(max_epochs=60, verbose=False):
     """Run comparison of all 4 architectures"""

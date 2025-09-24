@@ -99,78 +99,124 @@ OUTPUT: (289, 30, 512)
 
 ```
 UNetCompression/
-├── x_only_manifold_reconstruction_corrected.py  # Original corrected implementation
-├── x_only_manifold_reconstruction_mlp.py         # MLP Autoencoder
-├── x_only_manifold_reconstruction_lstm.py      # LSTM Autoencoder
-├── x_only_manifold_reconstruction_causalae.py  # CausalAE Autoencoder
-├── x_only_manifold_reconstruction_edgenet.py   # EDGeNet Autoencoder
-├── compare_all_architectures.py                 # Comprehensive comparison
-├── test_latent_combinations.py                 # Latent space testing
-├── test_d8_to_d16.py                           # Focused D=8-16 testing
-├── quick_d8_to_d16_test.py                     # Quick visualization testing
-├── hankel_matrix_3d.py                         # 3D Hankel matrix utilities
-├── hankel_dataset.py                           # Original 2D Hankel dataset
-├── lorenz.py                                   # Lorenz system generation
-├── example_stride_5.py                         # Example with stride=5
-├── example_1489_10_512.py                      # Example achieving (1489,10,512)
-├── reversed_adaptive_noise.py                  # Adaptive noise training
-├── latent_manifold_analysis.py                 # Latent space analysis
-├── reconstructed_manifold_analysis.py         # Reconstruction analysis
-├── plots/                                      # Generated visualizations
-├── requirements.txt                            # Python dependencies
-└── README.md                                   # This file
+├── README.md
+├── requirements.txt
+├── src/                          # Source code package
+│   ├── __init__.py
+│   ├── core/                     # Core functionality
+│   │   ├── __init__.py
+│   │   ├── hankel_matrix_3d.py   # 3D Hankel matrix construction
+│   │   ├── hankel_dataset.py     # Dataset handling
+│   │   └── lorenz.py             # Lorenz attractor generation
+│   ├── architectures/            # Autoencoder architectures
+│   │   ├── __init__.py
+│   │   ├── x_only_manifold_reconstruction_corrected.py  # Main implementation
+│   │   ├── x_only_manifold_reconstruction_mlp.py        # MLP version
+│   │   ├── x_only_manifold_reconstruction_lstm.py       # LSTM version
+│   │   ├── x_only_manifold_reconstruction_causalae.py   # CausalAE version
+│   │   ├── x_only_manifold_reconstruction_edgenet.py    # EDGeNet version
+│   │   └── x_only_manifold_reconstruction.py           # Original version
+│   └── utils/                   # Utility functions
+│       ├── __init__.py
+│       ├── analyze_artifacts.py
+│       ├── generate_plots.py
+│       ├── latent_manifold_analysis.py
+│       └── reconstructed_manifold_analysis.py
+├── examples/                    # Example scripts
+│   ├── __init__.py
+│   ├── example_1489_10_512.py
+│   ├── example_stride_5.py
+│   ├── main_direct_manifold.py
+│   └── reversed_adaptive_noise.py
+├── tests/                       # Test scripts
+│   ├── __init__.py
+│   ├── compare_all_architectures.py
+│   ├── test_d8_to_d16.py
+│   ├── test_latent_combinations.py
+│   └── quick_d8_to_d16_test.py
+├── models/                      # Saved models
+│   ├── direct_manifold_model.py
+│   ├── direct_manifold_training.py
+│   └── direct_manifold_autoencoder.pth
+├── configs/                     # Configuration files
+│   └── gitpushinstructions.txt
+├── plots/                       # Generated visualizations
+│   ├── all_architectures_comparison.png
+│   ├── d8_to_d16_comparison.png
+│   ├── latent_combinations_comparison.png
+│   ├── edgenet_manifold_reconstruction.png
+│   └── x_only_manifold_reconstruction_corrected.png
+├── docs/                        # Documentation
+└── data/                        # Data files
 ```
 
 ## 🚀 Usage
 
 ### 1. Individual Architecture Testing
 ```bash
-# Test each architecture individually
-python x_only_manifold_reconstruction_mlp.py
-python x_only_manifold_reconstruction_lstm.py
-python x_only_manifold_reconstruction_causalae.py
-python x_only_manifold_reconstruction_edgenet.py
+# Test the corrected implementation (recommended)
+python src/architectures/x_only_manifold_reconstruction_corrected.py
+
+# Test MLP Autoencoder
+python src/architectures/x_only_manifold_reconstruction_mlp.py
+
+# Test LSTM Autoencoder
+python src/architectures/x_only_manifold_reconstruction_lstm.py
+
+# Test CausalAE
+python src/architectures/x_only_manifold_reconstruction_causalae.py
+
+# Test EDGeNet
+python src/architectures/x_only_manifold_reconstruction_edgenet.py
 ```
 
 ### 2. Comprehensive Comparison
 ```bash
-# Compare all architectures
-python compare_all_architectures.py
+# Compare all 4 architectures
+python tests/compare_all_architectures.py
+
+# Test latent space combinations
+python tests/test_latent_combinations.py
+
+# Quick D=8 to D=16 test
+python tests/quick_d8_to_d16_test.py
 ```
 
-### 3. Latent Space Testing
+### 3. Examples and Demos
 ```bash
-# Test different latent combinations
-python test_latent_combinations.py
+# Example with stride=5
+python examples/example_stride_5.py
 
-# Focused testing D=8 to D=16
-python test_d8_to_d16.py
+# Example achieving (1489,10,512) shape
+python examples/example_1489_10_512.py
 
-# Quick visualization testing
-python quick_d8_to_d16_test.py
+# Adaptive noise training
+python examples/reversed_adaptive_noise.py
 ```
 
 ### 4. Interactive Usage
 ```python
-from x_only_manifold_reconstruction_mlp import XOnlyManifoldReconstructorMLP
-from lorenz import generate_lorenz_full
+import sys
+sys.path.append('src')
+
+from architectures.x_only_manifold_reconstruction_corrected import XOnlyManifoldReconstructorCorrected
+from core.lorenz import generate_lorenz_full
 
 # Generate Lorenz attractor
 traj, t = generate_lorenz_full(T=20.0, dt=0.01)
 
-# Create reconstructor (choose architecture)
-reconstructor = XOnlyManifoldReconstructorMLP(
+# Create reconstructor
+reconstructor = XOnlyManifoldReconstructorCorrected(
     window_len=512,
     delay_embedding_dim=10,
     stride=5,
-    latent_d=32,  # Network-determined feature dimensions
-    latent_l=128,  # Compressed signal length
-    train_split=0.7
+    latent_d=32,
+    latent_l=128
 )
 
 # Prepare data and train
 reconstructor.prepare_data(traj, t)
-reconstructor.train(max_epochs=150)
+reconstructor.train(max_epochs=100)
 
 # Reconstruct manifold
 original, reconstructed, metrics = reconstructor.reconstruct_manifold()
@@ -178,7 +224,7 @@ original, reconstructed, metrics = reconstructor.reconstruct_manifold()
 # Visualize results
 reconstructor.visualize_results(
     original, reconstructed, metrics,
-    save_path='plots/mlp_manifold_reconstruction.png'
+    save_path='plots/corrected_manifold_reconstruction.png'
 )
 ```
 

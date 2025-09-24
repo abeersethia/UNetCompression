@@ -1,20 +1,22 @@
 """
-X-Only Manifold Reconstruction using MLP Autoencoder
+X-Only Manifold Reconstruction using CausalAE (Causal Autoencoder)
 
-This file implements X-only manifold reconstruction with a simple 
-Multi-Layer Perceptron (MLP) autoencoder architecture.
+This file implements X-only manifold reconstruction with a 
+Causal Autoencoder architecture for respecting temporal causality.
 
 Based on: x_only_manifold_reconstruction_corrected.py
-Architecture: MLP Autoencoder
+Architecture: CausalAE (Causal Autoencoder)
+Reference: https://github.com/williamgilpin/fnn/blob/master/fnn/networks.py
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from lorenz import generate_lorenz_full
+from ..core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from ..core.lorenz import generate_lorenz_full
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
 import time
@@ -23,17 +25,44 @@ def count_parameters(model):
     """Count the number of trainable parameters in a model"""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def estimate_flops(model, input_shape):
-    """Estimate FLOPs for a model (simplified estimation)"""
+def estimate_causal_flops(model, input_shape):
+    """Estimate FLOPs for Causal CNN model"""
     total_flops = 0
     for layer in model.modules():
-        if isinstance(layer, nn.Linear):
-            # FLOPs = input_size * output_size * 2 (multiply-add)
+        if isinstance(layer, nn.Conv1d):
+            # FLOPs = output_size * kernel_size * input_channels * output_channels
+            kernel_size = layer.kernel_size[0]
+            in_channels = layer.in_channels
+            out_channels = layer.out_channels
+            # Approximate output size (assuming same padding)
+            output_size = input_shape[-1]  # temporal dimension
+            total_flops += output_size * kernel_size * in_channels * out_channels * 2
+        elif isinstance(layer, nn.Linear):
             total_flops += layer.in_features * layer.out_features * 2
     return total_flops
 
-class MLPEncoder(nn.Module):
-    """MLP Encoder with flatten input"""
+class CausalConv1d(nn.Module):
+    """Causal 1D Convolution that respects temporal causality"""
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.padding = (kernel_size - 1) * dilation
+        
+        self.conv = nn.Conv1d(
+            in_channels, out_channels, kernel_size,
+            padding=self.padding, dilation=dilation
+        )
+        
+    def forward(self, x):
+        x = self.conv(x)
+        # Remove future information by trimming the end
+        if self.padding > 0:
+            x = x[:, :, :-self.padding]
+        return x
+
+class CausalEncoder(nn.Module):
+    """Causal Encoder using causal convolutions"""
     def __init__(self, input_d, input_l, latent_d, latent_l):
         super().__init__()
         self.input_d = input_d
@@ -41,39 +70,46 @@ class MLPEncoder(nn.Module):
         self.latent_d = latent_d
         self.latent_l = latent_l
         
-        # Flatten input and create MLP
-        input_size = input_d * input_l
-        latent_size = latent_d * latent_l
+        # Causal convolutional layers with increasing dilation
+        self.causal_conv1 = CausalConv1d(input_d, 32, kernel_size=3, dilation=1)
+        self.causal_conv2 = CausalConv1d(32, 64, kernel_size=3, dilation=2)
+        self.causal_conv3 = CausalConv1d(64, 128, kernel_size=3, dilation=4)
+        self.causal_conv4 = CausalConv1d(128, latent_d, kernel_size=3, dilation=8)
         
-        self.mlp = nn.Sequential(
-            nn.Linear(input_size, 1024),
-            nn.ReLU(),
-            nn.BatchNorm1d(1024),
-            nn.Dropout(0.3),
-            
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.BatchNorm1d(512),
-            nn.Dropout(0.3),
-            
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, latent_size)
-        )
+        # Batch normalization and dropout
+        self.bn1 = nn.BatchNorm1d(32)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.bn4 = nn.BatchNorm1d(latent_d)
+        
+        self.dropout = nn.Dropout(0.3)
+        
+        # Temporal compression
+        self.temporal_compress = nn.AdaptiveAvgPool1d(latent_l)
         
     def forward(self, x):
         # x shape: (B, D, L)
-        batch_size = x.size(0)
-        x_flat = x.view(batch_size, -1)  # Flatten to (B, D*L)
-        latent_flat = self.mlp(x_flat)   # (B, latent_d*latent_l)
-        latent = latent_flat.view(batch_size, self.latent_d, self.latent_l)  # (B, latent_d, latent_l)
-        return latent
+        
+        # Causal convolution layers
+        x = F.relu(self.bn1(self.causal_conv1(x)))
+        x = self.dropout(x)
+        
+        x = F.relu(self.bn2(self.causal_conv2(x)))
+        x = self.dropout(x)
+        
+        x = F.relu(self.bn3(self.causal_conv3(x)))
+        x = self.dropout(x)
+        
+        x = F.relu(self.bn4(self.causal_conv4(x)))
+        x = self.dropout(x)
+        
+        # Temporal compression
+        x = self.temporal_compress(x)  # (B, latent_d, latent_l)
+        
+        return x
 
-class MLPDecoder(nn.Module):
-    """MLP Decoder with reshape output"""
+class CausalDecoder(nn.Module):
+    """Causal Decoder using transposed causal convolutions"""
     def __init__(self, latent_d, latent_l, output_d, output_l):
         super().__init__()
         self.latent_d = latent_d
@@ -81,39 +117,44 @@ class MLPDecoder(nn.Module):
         self.output_d = output_d
         self.output_l = output_l
         
-        # Create MLP
-        latent_size = latent_d * latent_l
-        output_size = output_d * output_l
+        # Temporal expansion
+        self.temporal_expand = nn.Upsample(size=output_l, mode='linear', align_corners=False)
         
-        self.mlp = nn.Sequential(
-            nn.Linear(latent_size, 256),
-            nn.ReLU(),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 512),
-            nn.ReLU(),
-            nn.BatchNorm1d(512),
-            nn.Dropout(0.3),
-            
-            nn.Linear(512, 1024),
-            nn.ReLU(),
-            nn.BatchNorm1d(1024),
-            nn.Dropout(0.3),
-            
-            nn.Linear(1024, output_size)
-        )
+        # Causal transposed convolutions
+        self.causal_deconv1 = CausalConv1d(latent_d, 128, kernel_size=3, dilation=8)
+        self.causal_deconv2 = CausalConv1d(128, 64, kernel_size=3, dilation=4)
+        self.causal_deconv3 = CausalConv1d(64, 32, kernel_size=3, dilation=2)
+        self.causal_deconv4 = CausalConv1d(32, output_d, kernel_size=3, dilation=1)
+        
+        # Batch normalization and dropout
+        self.bn1 = nn.BatchNorm1d(128)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.bn3 = nn.BatchNorm1d(32)
+        
+        self.dropout = nn.Dropout(0.3)
         
     def forward(self, x):
         # x shape: (B, latent_d, latent_l)
-        batch_size = x.size(0)
-        x_flat = x.view(batch_size, -1)  # Flatten to (B, latent_d*latent_l)
-        output_flat = self.mlp(x_flat)   # (B, output_d*output_l)
-        output = output_flat.view(batch_size, self.output_d, self.output_l)  # (B, output_d, output_l)
-        return output
+        
+        # Temporal expansion
+        x = self.temporal_expand(x)  # (B, latent_d, output_l)
+        
+        # Causal deconvolution layers
+        x = F.relu(self.bn1(self.causal_deconv1(x)))
+        x = self.dropout(x)
+        
+        x = F.relu(self.bn2(self.causal_deconv2(x)))
+        x = self.dropout(x)
+        
+        x = F.relu(self.bn3(self.causal_deconv3(x)))
+        x = self.dropout(x)
+        
+        x = self.causal_deconv4(x)  # (B, output_d, output_l)
+        
+        return x
 
-class XOnlyManifoldReconstructorMLP:
-    """X-Only Manifold Reconstructor using MLP architecture"""
+class XOnlyManifoldReconstructorCausalAE:
+    """X-Only Manifold Reconstructor using CausalAE architecture"""
     
     def __init__(self, window_len=512, delay_embedding_dim=10, stride=5, 
                  latent_d=32, latent_l=128, train_split=0.7):
@@ -130,16 +171,16 @@ class XOnlyManifoldReconstructorMLP:
         self.dataset_y = None
         self.dataset_z = None
         
-    def create_mlp_autoencoder(self):
-        """Create MLP autoencoder architecture"""
-        encoder = MLPEncoder(
+    def create_causal_autoencoder(self):
+        """Create CausalAE autoencoder architecture"""
+        encoder = CausalEncoder(
             input_d=self.delay_embedding_dim,
             input_l=self.window_len,
             latent_d=self.latent_d,
             latent_l=self.latent_l
         )
         
-        decoder = MLPDecoder(
+        decoder = CausalDecoder(
             latent_d=self.latent_d,
             latent_l=self.latent_l,
             output_d=3 * self.delay_embedding_dim,
@@ -214,23 +255,24 @@ class XOnlyManifoldReconstructorMLP:
         return base_std * (epoch / max_epochs) + 0.01
     
     def train(self, max_epochs=150, base_noise_std=0.1, patience=25, verbose=True):
-        """Train the MLP autoencoder"""
+        """Train the CausalAE autoencoder"""
         if self.input_data is None:
             raise ValueError("Data not prepared. Call prepare_data first.")
         
-        print(f"\n=== TRAINING MLP AUTOENCODER ===")
-        print(f"Architecture: Multi-Layer Perceptron")
+        print(f"\n=== TRAINING CAUSAL AUTOENCODER ===")
+        print(f"Architecture: Causal Autoencoder (Causal CNN)")
         print(f"Input: X component only")
         print(f"Output: Full attractor (X, Y, Z)")
         print(f"Latent shape: (B, {self.latent_d}, {self.latent_l})")
+        print(f"Causality: Respects temporal ordering")
         
         # Create autoencoder
-        self.encoder, self.decoder = self.create_mlp_autoencoder()
+        self.encoder, self.decoder = self.create_causal_autoencoder()
         
         # Print model statistics
         total_params = count_parameters(self.encoder) + count_parameters(self.decoder)
         input_shape = (1, self.delay_embedding_dim, self.window_len)
-        total_flops = estimate_flops(self.encoder, input_shape) + estimate_flops(self.decoder, (1, self.latent_d, self.latent_l))
+        total_flops = estimate_causal_flops(self.encoder, input_shape) + estimate_causal_flops(self.decoder, (1, self.latent_d, self.latent_l))
         
         print(f"Model Statistics:")
         print(f"  Encoder parameters: {count_parameters(self.encoder):,}")
@@ -247,7 +289,7 @@ class XOnlyManifoldReconstructorMLP:
         # Setup training
         optimizer = torch.optim.AdamW(
             list(self.encoder.parameters()) + list(self.decoder.parameters()), 
-            lr=5e-4, weight_decay=1e-3
+            lr=1e-3, weight_decay=1e-3
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5, patience=10
@@ -335,7 +377,7 @@ class XOnlyManifoldReconstructorMLP:
         if self.encoder is None or self.decoder is None:
             raise ValueError("Model not trained. Call train first.")
         
-        print(f"\n=== RECONSTRUCTING MANIFOLD (MLP) ===")
+        print(f"\n=== RECONSTRUCTING MANIFOLD (CAUSAL AE) ===")
         
         # Get reconstructed data for all data
         with torch.no_grad():
@@ -414,8 +456,8 @@ class XOnlyManifoldReconstructorMLP:
         return original_attractor, reconstructed_attractor, metrics
     
     def visualize_results(self, original_attractor, reconstructed_attractor, metrics, save_path=None):
-        """Create visualization of MLP results"""
-        print(f"\n=== CREATING MLP VISUALIZATION ===")
+        """Create visualization of CausalAE results"""
+        print(f"\n=== CREATING CAUSAL AE VISUALIZATION ===")
         
         # Create time vector
         t = np.linspace(0, 20.0, len(original_attractor))
@@ -431,25 +473,25 @@ class XOnlyManifoldReconstructorMLP:
         ax1.set_zlabel('Z')
         ax1.set_title('Original Lorenz Attractor\n(3D)', fontsize=12)
         
-        # 2. MLP Reconstructed Manifold (3D)
+        # 2. CausalAE Reconstructed Manifold (3D)
         ax2 = fig.add_subplot(2, 3, 2, projection='3d')
         ax2.plot(reconstructed_attractor[:, 0], reconstructed_attractor[:, 1], reconstructed_attractor[:, 2], 
-                 alpha=0.8, linewidth=1, color='red', label='MLP Reconstructed')
+                 alpha=0.8, linewidth=1, color='red', label='CausalAE Reconstructed')
         ax2.set_xlabel('X')
         ax2.set_ylabel('Y')
         ax2.set_zlabel('Z')
-        ax2.set_title('MLP Reconstructed Manifold\n(3D)', fontsize=12)
+        ax2.set_title('CausalAE Reconstructed Manifold\n(3D)', fontsize=12)
         
         # 3. Overlay Comparison
         ax3 = fig.add_subplot(2, 3, 3, projection='3d')
         ax3.plot(original_attractor[:, 0], original_attractor[:, 1], original_attractor[:, 2], 
                  alpha=0.6, linewidth=1, color='blue', label='Original')
         ax3.plot(reconstructed_attractor[:, 0], reconstructed_attractor[:, 1], reconstructed_attractor[:, 2], 
-                 alpha=0.8, linewidth=1, color='red', label='MLP Reconstructed')
+                 alpha=0.8, linewidth=1, color='red', label='CausalAE Reconstructed')
         ax3.set_xlabel('X')
         ax3.set_ylabel('Y')
         ax3.set_zlabel('Z')
-        ax3.set_title('MLP Overlay Comparison', fontsize=12)
+        ax3.set_title('CausalAE Overlay Comparison', fontsize=12)
         ax3.legend()
         
         # 4. Correlation Analysis
@@ -460,7 +502,7 @@ class XOnlyManifoldReconstructorMLP:
         
         bars = ax4.bar(components, correlations, color=colors, alpha=0.7)
         ax4.set_ylabel('Correlation')
-        ax4.set_title('MLP Component Correlations', fontsize=12)
+        ax4.set_title('CausalAE Component Correlations', fontsize=12)
         ax4.set_ylim(0, 1)
         ax4.grid(True, alpha=0.3)
         
@@ -474,15 +516,15 @@ class XOnlyManifoldReconstructorMLP:
         ax5.plot(t, metrics['error_3d'], alpha=0.8, linewidth=1, color='red')
         ax5.set_xlabel('Time')
         ax5.set_ylabel('Reconstruction Error')
-        ax5.set_title('MLP Error Evolution', fontsize=12)
+        ax5.set_title('CausalAE Error Evolution', fontsize=12)
         ax5.grid(True, alpha=0.3)
         
         # 6. Performance Summary
         ax6 = fig.add_subplot(2, 3, 6)
         ax6.axis('off')
-        summary_text = f'''MLP AUTOENCODER RESULTS:
+        summary_text = f'''CAUSAL AUTOENCODER RESULTS:
 
-ARCHITECTURE: Multi-Layer Perceptron
+ARCHITECTURE: Causal CNN
 PARAMETERS: {self.training_history['total_parameters']:,}
 FLOPS: {self.training_history['estimated_flops']:,}
 
@@ -500,31 +542,36 @@ COMPRESSION:
 Temporal: {self.window_len / self.latent_l:.1f}:1
 Features: {self.delay_embedding_dim} → {self.latent_d}
 
-LATENT SHAPE: ({self.input_data.shape[0]}, {self.latent_d}, {self.latent_l})'''
+LATENT SHAPE: ({self.input_data.shape[0]}, {self.latent_d}, {self.latent_l})
+
+CAUSAL PROPERTIES:
+✓ Respects temporal causality
+✓ Dilated convolutions (1,2,4,8)
+✓ No future information leakage'''
         
         ax6.text(0.05, 0.95, summary_text, transform=ax6.transAxes, fontsize=10,
                   verticalalignment='top', fontfamily='monospace',
-                  bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+                  bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
         
         plt.tight_layout()
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"MLP visualization saved to: {save_path}")
+            print(f"CausalAE visualization saved to: {save_path}")
         
         plt.show()
         
         return fig
 
 def main():
-    """Main function for MLP autoencoder testing"""
-    print("=== X-ONLY MANIFOLD RECONSTRUCTION (MLP AUTOENCODER) ===")
+    """Main function for CausalAE autoencoder testing"""
+    print("=== X-ONLY MANIFOLD RECONSTRUCTION (CAUSAL AUTOENCODER) ===")
     
     # Generate Lorenz attractor
     traj, t = generate_lorenz_full(T=20.0, dt=0.01)
     
-    # Create MLP reconstructor
-    reconstructor = XOnlyManifoldReconstructorMLP(
+    # Create CausalAE reconstructor
+    reconstructor = XOnlyManifoldReconstructorCausalAE(
         window_len=512,
         delay_embedding_dim=10,
         stride=5,
@@ -543,18 +590,19 @@ def main():
     # Visualize results
     fig = reconstructor.visualize_results(
         original_attractor, reconstructed_attractor, metrics,
-        save_path='mlp_manifold_reconstruction.png'
+        save_path='causalae_manifold_reconstruction.png'
     )
     
     # Print final results
-    print(f"\n=== MLP AUTOENCODER SUMMARY ===")
-    print(f"✅ Architecture: Multi-Layer Perceptron")
+    print(f"\n=== CAUSAL AUTOENCODER SUMMARY ===")
+    print(f"✅ Architecture: Causal Autoencoder (Causal CNN)")
     print(f"📊 Parameters: {training_history['total_parameters']:,}")
     print(f"⚡ FLOPs: {training_history['estimated_flops']:,}")
     print(f"🔗 X correlation: {metrics['correlations']['X']:.4f}")
     print(f"🔗 Y correlation: {metrics['correlations']['Y']:.4f}")
     print(f"🔗 Z correlation: {metrics['correlations']['Z']:.4f}")
     print(f"📈 Mean error: {metrics['mean_error']:.4f}")
+    print(f"⏰ Temporal causality: Respected")
     
     return reconstructor, original_attractor, reconstructed_attractor, metrics
 

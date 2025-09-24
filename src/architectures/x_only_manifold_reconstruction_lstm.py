@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from lorenz import generate_lorenz_full
+from ..core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from ..core.lorenz import generate_lorenz_full
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
 import time

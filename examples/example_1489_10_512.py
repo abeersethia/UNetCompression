@@ -6,8 +6,12 @@ Demonstrates the stride-based delay embedding approach
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from lorenz import generate_lorenz_full
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from src.core.lorenz import generate_lorenz_full
 
 
 def create_1489_10_512_hankel():
