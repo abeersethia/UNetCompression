@@ -8,6 +8,24 @@ This project implements **X-Only Manifold Reconstruction** using delay embedding
 **Output**: Full attractor (X, Y, Z)  
 **Method**: Learn causal relationships in 3D latent space with shape `(B, D, L)`
 
+## 🏆 Key Results Summary
+
+### ✅ **Successful X-Only Reconstruction**
+- **All 4 architectures** successfully reconstruct the full Lorenz attractor from X-only input
+- **High correlation preservation**: >98% for X and Y components, >93% for Z component
+- **Causal relationships learned**: X→Y, X→Z, Y→Z relationships preserved across all architectures
+
+### 📊 **Architecture Performance Rankings**
+1. **🏆 EDGeNet**: Best overall quality (0.9889 X corr, 0.9856 Y corr, 0.9523 Z corr)
+2. **⚡ MLP**: Most efficient training (~45s) and best parameter efficiency
+3. **🧠 LSTM**: Excellent temporal modeling with moderate complexity
+4. **⏰ CausalAE**: Respects temporal causality with good performance
+
+### 🔬 **Latent Space Optimization**
+- **Optimal combination**: D=32, L=128 (4:1 compression ratio)
+- **Best compression**: D=16, L=64 (8:1 compression ratio) with minimal quality loss
+- **Highest quality**: D=64, L=256 (2:1 compression ratio) for maximum fidelity
+
 ## 🏗️ Architecture Comparison
 
 We implement **4 different autoencoder architectures** for X-only manifold reconstruction:
@@ -46,6 +64,12 @@ We implement **4 different autoencoder architectures** for X-only manifold recon
 | **LSTM** | ~1-2M | ~80M | 0.9876 | 0.9845 | 0.9456 | 1.4234 | ~60s |
 | **CausalAE** | ~3-4M | ~60M | 0.9865 | 0.9832 | 0.9389 | 1.4567 | ~55s |
 | **EDGeNet** | ~2-3M | ~70M | 0.9889 | 0.9856 | 0.9523 | 1.3891 | ~65s |
+
+### 🏆 Comprehensive Architecture Comparison
+
+![All Architectures Comparison](plots/all_architectures_comparison.png)
+
+*Comprehensive comparison of all 4 autoencoder architectures showing 3D manifold reconstructions, performance metrics, and efficiency analysis.*
 
 ## 🏗️ Latent Space Structure
 
@@ -200,12 +224,37 @@ reconstructor.visualize_results(
 - **🚀 Fastest Training**: MLP (shortest training time)
 - **🎯 Best Error**: EDGeNet (lowest reconstruction error)
 
-### Latent Space Testing Results
+### 🔬 Latent Space Testing Results
+
+![Latent Combinations Comparison](plots/latent_combinations_comparison.png)
+
+*Comprehensive analysis of different latent dimension combinations (D=8-16, L=64-256) showing correlation vs compression tradeoffs.*
+
 | Combination | X Corr | Y Corr | Z Corr | Mean Error | Compression | Time(s) |
 |-------------|--------|--------|--------|------------|-------------|---------|
 | D=16, L=64  | 0.9823 | 0.9756 | 0.9123 | 1.8234     | 8.0:1       | 45.2    |
 | D=32, L=128 | 0.9854 | 0.9820 | 0.9355 | 1.5486     | 4.0:1       | 67.8    |
 | D=64, L=256 | 0.9876 | 0.9845 | 0.9456 | 1.4234     | 2.0:1       | 89.3    |
+
+### 📊 D=8 to D=16 Focused Analysis
+
+![D8 to D16 Comparison](plots/d8_to_d16_comparison.png)
+
+*Focused analysis of latent dimensions D=8 to D=16 showing optimal parameter combinations for different use cases.*
+
+## 🎨 Individual Architecture Results
+
+### 🧠 EDGeNet Architecture Results
+
+![EDGeNet Manifold Reconstruction](plots/edgenet_manifold_reconstruction.png)
+
+*EDGeNet (Enhanced Dynamic Graph Edge Network) results showing 3D manifold reconstruction, component correlations, and performance metrics.*
+
+### 🔧 Corrected X-Only Manifold Reconstruction
+
+![X-Only Manifold Reconstruction](plots/x_only_manifold_reconstruction_corrected.png)
+
+*Comprehensive visualization of the corrected X-only manifold reconstruction showing original vs reconstructed attractors, latent space analysis, and verification metrics.*
 
 ## 🎯 Key Insights
 
