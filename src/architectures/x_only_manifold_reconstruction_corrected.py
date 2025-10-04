@@ -1,10 +1,12 @@
 """
-X-Only Manifold Reconstruction for Lorenz Attractor - CORRECTED VERSION
+X-Only Manifold Reconstruction for Lorenz Attractor - DIRECT SIGNAL VERSION
 
 This file implements the X-only manifold reconstruction approach where:
-- Input: X component (B, D_input, L_input)
+- Input: Hankel matrix of X component (B, delay_dim, window_len)
 - Latent: (B, D, L) where D is network-determined and L is compressed
-- Output: Full attractor (X, Y, Z)
+- Output: Direct time-domain signals (X, Y, Z)
+
+Pipeline: Hankel → Direct Signal (bypasses Hankel reconstruction)
 
 The latent space preserves the 3D structure with:
 - B: Batch size
@@ -18,17 +20,23 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from ..core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
-from ..core.lorenz import generate_lorenz_full
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+from src.core.hankel_matrix_3d import Hankel3DDataset, reconstruct_from_3d_hankel
+from src.core.lorenz import generate_lorenz_full
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
 
 class XOnlyManifoldReconstructorCorrected:
     """
-    X-Only Manifold Reconstructor with correct latent shape (B, D, L)
+    X-Only Manifold Reconstructor with direct signal output
     
     This class implements the complete pipeline for reconstructing the full
-    Lorenz attractor from just the X component using proper 3D latent space.
+    Lorenz attractor from just the X component using direct signal output.
+    Pipeline: Hankel → Direct Signal (bypasses Hankel reconstruction)
     """
     
     def __init__(self, window_len=512, delay_embedding_dim=10, stride=5, 
@@ -55,8 +63,7 @@ class XOnlyManifoldReconstructorCorrected:
         self.encoder = None
         self.decoder = None
         self.dataset_x = None
-        self.dataset_y = None
-        self.dataset_z = None
+        self.original_signals = None  # Store original X, Y, Z signals
         
     def create_3d_autoencoder(self):
         """Create 3D autoencoder with proper latent shape (B, D, L)"""
@@ -101,20 +108,19 @@ class XOnlyManifoldReconstructorCorrected:
                 return x  # Shape: (B, latent_d, latent_l)
         
         class Decoder3D(nn.Module):
-            def __init__(self, latent_d, latent_l, output_d, output_l):
+            def __init__(self, latent_d, latent_l, output_l):
                 super().__init__()
                 self.latent_d = latent_d
                 self.latent_l = latent_l
-                self.output_d = output_d  # Should be 30 (3 * 10)
                 self.output_l = output_l
                 
                 # Temporal expansion
                 self.temporal_expand = nn.AdaptiveAvgPool1d(output_l)
                 
-                # 3D Convolutional layers for reconstruction
+                # 3D Convolutional layers for direct signal reconstruction
                 self.conv1 = nn.Conv1d(latent_d, 128, kernel_size=3, padding=1)
                 self.conv2 = nn.Conv1d(128, 64, kernel_size=3, padding=1)
-                self.conv3 = nn.Conv1d(64, output_d, kernel_size=3, padding=1)  # Output 30 dimensions
+                self.conv3 = nn.Conv1d(64, 3, kernel_size=3, padding=1)  # Output 3 direct signals (X, Y, Z)
                 
                 self.bn1 = nn.BatchNorm1d(128)
                 self.bn2 = nn.BatchNorm1d(64)
@@ -136,7 +142,7 @@ class XOnlyManifoldReconstructorCorrected:
                 
                 x = self.conv3(x)
                 
-                return x  # Shape: (B, output_d, output_l) = (B, 30, 512)
+                return x  # Shape: (B, 3, output_l) = (B, 3, 512) - Direct signals
         
         encoder = Encoder3D(
             input_d=self.delay_embedding_dim,
@@ -148,7 +154,6 @@ class XOnlyManifoldReconstructorCorrected:
         decoder = Decoder3D(
             latent_d=self.latent_d,
             latent_l=self.latent_l,
-            output_d=3 * self.delay_embedding_dim,  # 30 dimensions (3 * 10)
             output_l=self.window_len
         )
         
@@ -160,11 +165,14 @@ class XOnlyManifoldReconstructorCorrected:
         y = traj[:, 1]
         z = traj[:, 2]
         
+        # Store original signals for later comparison
+        self.original_signals = {'x': x, 'y': y, 'z': z}
+        
         print(f"Preparing data...")
         print(f"  Original signal length: {len(x)}")
         print(f"  Original attractor shape: {traj.shape}")
         
-        # Create datasets for all components
+        # Create dataset for X component (input)
         self.dataset_x = Hankel3DDataset(
             signal=x, 
             window_len=self.window_len, 
@@ -174,36 +182,35 @@ class XOnlyManifoldReconstructorCorrected:
             shuffle=False
         )
         
-        self.dataset_y = Hankel3DDataset(
-            signal=y, 
-            window_len=self.window_len, 
-            delay_embedding_dim=self.delay_embedding_dim, 
-            stride=self.stride,
-            normalize=True, 
-            shuffle=False
-        )
-        
-        self.dataset_z = Hankel3DDataset(
-            signal=z, 
-            window_len=self.window_len, 
-            delay_embedding_dim=self.delay_embedding_dim, 
-            stride=self.stride,
-            normalize=True, 
-            shuffle=False
-        )
-        
-        # Get Hankel matrices
+        # Get Hankel matrix for X (input)
         hankel_x = self.dataset_x.hankel_matrix
-        hankel_y = self.dataset_y.hankel_matrix
-        hankel_z = self.dataset_z.hankel_matrix
-        
         n_batches, delay_dim, window_len = hankel_x.shape
         
         print(f"  Hankel matrix shape: {hankel_x.shape}")
         print(f"  Latent shape will be: ({n_batches}, {self.latent_d}, {self.latent_l})")
         
-        # Create target data (X + Y + Z)
-        self.target_data = np.concatenate([hankel_x, hankel_y, hankel_z], axis=1)
+        # Create target data: Direct time-domain signals (X, Y, Z)
+        # Align target with Hankel batch structure
+        target_signals = []
+        for batch_idx in range(n_batches):
+            batch_start = self.dataset_x.batch_starts[batch_idx]
+            batch_end = min(batch_start + self.window_len, len(x))
+            
+            # Extract signals for this batch
+            x_segment = x[batch_start:batch_end]
+            y_segment = y[batch_start:batch_end]
+            z_segment = z[batch_start:batch_end]
+            
+            # Pad if necessary
+            if len(x_segment) < self.window_len:
+                pad_len = self.window_len - len(x_segment)
+                x_segment = np.pad(x_segment, (0, pad_len), mode='edge')
+                y_segment = np.pad(y_segment, (0, pad_len), mode='edge')
+                z_segment = np.pad(z_segment, (0, pad_len), mode='edge')
+            
+            target_signals.append(np.stack([x_segment, y_segment, z_segment]))
+        
+        self.target_data = np.array(target_signals)  # (n_batches, 3, window_len)
         self.input_data = hankel_x
         
         print(f"  Input data shape: {self.input_data.shape}")
@@ -233,11 +240,11 @@ class XOnlyManifoldReconstructorCorrected:
         if self.input_data is None:
             raise ValueError("Data not prepared. Call prepare_data first.")
         
-        print(f"\n=== TRAINING X-ONLY MANIFOLD RECONSTRUCTOR (CORRECTED) ===")
-        print(f"Input: X component only")
-        print(f"Output: Full attractor (X, Y, Z)")
+        print(f"\n=== TRAINING X-ONLY MANIFOLD RECONSTRUCTOR (DIRECT SIGNAL) ===")
+        print(f"Input: Hankel matrix of X component")
+        print(f"Output: Direct time-domain signals (X, Y, Z)")
         print(f"Latent shape: (B, {self.latent_d}, {self.latent_l})")
-        print(f"Method: Learn causal relationships in 3D latent space")
+        print(f"Method: Hankel → Direct Signal (bypasses Hankel reconstruction)")
         
         # Create autoencoder
         self.encoder, self.decoder = self.create_3d_autoencoder()
@@ -334,11 +341,11 @@ class XOnlyManifoldReconstructorCorrected:
         return self.training_history
     
     def reconstruct_manifold(self):
-        """Reconstruct the full manifold from X component only"""
+        """Reconstruct the full manifold from X component only using direct signals"""
         if self.encoder is None or self.decoder is None:
             raise ValueError("Model not trained. Call train first.")
         
-        print(f"\n=== RECONSTRUCTING MANIFOLD FROM X-ONLY INPUT ===")
+        print(f"\n=== RECONSTRUCTING DIRECT MANIFOLD FROM X-ONLY INPUT ===")
         
         # Get reconstructed data for all data
         with torch.no_grad():
@@ -350,61 +357,49 @@ class XOnlyManifoldReconstructorCorrected:
         
         print(f"Reconstructed data shape: {all_reconstructed.shape}")
         
-        # Split reconstructed data back into X, Y, Z components
+        # Reconstruct full signals by averaging overlapping segments
         n_batches = all_reconstructed.shape[0]
-        recon_x = all_reconstructed[:, :self.delay_embedding_dim, :]
-        recon_y = all_reconstructed[:, self.delay_embedding_dim:2*self.delay_embedding_dim, :]
-        recon_z = all_reconstructed[:, 2*self.delay_embedding_dim:3*self.delay_embedding_dim, :]
+        original_length = len(self.dataset_x.signal)
+        recon_x = np.zeros(original_length)
+        recon_y = np.zeros(original_length)
+        recon_z = np.zeros(original_length)
+        counts = np.zeros(original_length)
         
-        print(f"Reconstructed X shape: {recon_x.shape}")
-        print(f"Reconstructed Y shape: {recon_y.shape}")
-        print(f"Reconstructed Z shape: {recon_z.shape}")
+        for batch_idx in range(n_batches):
+            batch_start = self.dataset_x.batch_starts[batch_idx]
+            batch_end = min(batch_start + self.window_len, original_length)
+            segment_len = batch_end - batch_start
+            
+            recon_x[batch_start:batch_end] += all_reconstructed[batch_idx, 0, :segment_len]
+            recon_y[batch_start:batch_end] += all_reconstructed[batch_idx, 1, :segment_len]
+            recon_z[batch_start:batch_end] += all_reconstructed[batch_idx, 2, :segment_len]
+            counts[batch_start:batch_end] += 1
         
-        # Reconstruct signals from Hankel matrices
-        print("Reconstructing signals from Hankel matrices...")
-        recon_signal_x = reconstruct_from_3d_hankel(
-            recon_x, self.dataset_x.batch_starts, self.dataset_x.stride, 
-            len(self.dataset_x.signal), mean=self.dataset_x.mean, std=self.dataset_x.std
-        )
-        
-        recon_signal_y = reconstruct_from_3d_hankel(
-            recon_y, self.dataset_y.batch_starts, self.dataset_y.stride, 
-            len(self.dataset_y.signal), mean=self.dataset_y.mean, std=self.dataset_y.std
-        )
-        
-        recon_signal_z = reconstruct_from_3d_hankel(
-            recon_z, self.dataset_z.batch_starts, self.dataset_z.stride, 
-            len(self.dataset_z.signal), mean=self.dataset_z.mean, std=self.dataset_z.std
-        )
-        
-        # Ensure all signals have the same length
-        min_length = min(len(recon_signal_x), len(recon_signal_y), len(recon_signal_z))
+        # Average overlapping regions
+        recon_x /= np.maximum(counts, 1)
+        recon_y /= np.maximum(counts, 1)
+        recon_z /= np.maximum(counts, 1)
         
         # Get original signals
-        x_orig = self.dataset_x.signal[:min_length]
-        y_orig = self.dataset_y.signal[:min_length]
-        z_orig = self.dataset_z.signal[:min_length]
-        
-        # Truncate reconstructed signals
-        recon_x_trunc = recon_signal_x[:min_length]
-        recon_y_trunc = recon_signal_y[:min_length]
-        recon_z_trunc = recon_signal_z[:min_length]
+        x_orig = self.original_signals['x']
+        y_orig = self.original_signals['y']
+        z_orig = self.original_signals['z']
         
         # Create attractors
         original_attractor = np.column_stack([x_orig, y_orig, z_orig])
-        reconstructed_attractor = np.column_stack([recon_x_trunc, recon_y_trunc, recon_z_trunc])
+        reconstructed_attractor = np.column_stack([recon_x, recon_y, recon_z])
         
         print(f"Original attractor shape: {original_attractor.shape}")
         print(f"Reconstructed attractor shape: {reconstructed_attractor.shape}")
         
         # Calculate metrics
-        corr_x = np.corrcoef(x_orig, recon_x_trunc)[0, 1]
-        corr_y = np.corrcoef(y_orig, recon_y_trunc)[0, 1]
-        corr_z = np.corrcoef(z_orig, recon_z_trunc)[0, 1]
+        corr_x = np.corrcoef(x_orig, recon_x)[0, 1]
+        corr_y = np.corrcoef(y_orig, recon_y)[0, 1]
+        corr_z = np.corrcoef(z_orig, recon_z)[0, 1]
         
-        mse_x = mean_squared_error(x_orig, recon_x_trunc)
-        mse_y = mean_squared_error(y_orig, recon_y_trunc)
-        mse_z = mean_squared_error(z_orig, recon_z_trunc)
+        mse_x = mean_squared_error(x_orig, recon_x)
+        mse_y = mean_squared_error(y_orig, recon_y)
+        mse_z = mean_squared_error(z_orig, recon_z)
         
         error_3d = np.linalg.norm(original_attractor - reconstructed_attractor, axis=1)
         
@@ -611,12 +606,12 @@ class XOnlyManifoldReconstructorCorrected:
         # 14. Reconstruction Quality Metrics
         ax14 = fig.add_subplot(3, 5, 14)
         ax14.axis('off')
-        metrics_text = f'''X-ONLY MANIFOLD RECONSTRUCTION (CORRECTED):
+        metrics_text = f'''X-ONLY MANIFOLD RECONSTRUCTION (DIRECT SIGNAL):
 
 APPROACH:
-Input: X component only
-Output: Full attractor (X, Y, Z)
-Latent Shape: (B, D, L)
+Input: Hankel matrix of X component
+Output: Direct time-domain signals (X, Y, Z)
+Pipeline: Hankel → Direct Signal
 
 SHAPE COMPARISON:
 Original: {original_attractor.shape}
@@ -643,12 +638,12 @@ Shape: (B={latent_all.shape[0]}, D={latent_all.shape[1]}, L={latent_all.shape[2]
 Compression: {self.window_len / self.latent_l:.1f}:1 temporal
 
 RECONSTRUCTION PROCESS:
-1. X → Latent (B, D, L)
-2. Latent → (X, Y, Z)
-3. Learn causal relationships
-4. Reconstruct full attractor
+1. Hankel X → Latent (B, D, L)
+2. Latent → Direct signals (X, Y, Z)
+3. Bypass Hankel reconstruction
+4. Direct signal output
 
-SUCCESS: ✓ Full attractor from X-only input!'''
+SUCCESS: ✓ Direct signals from X-only Hankel input!'''
 
         ax14.text(0.05, 0.95, metrics_text, transform=ax14.transAxes, fontsize=10,
                   verticalalignment='top', fontfamily='monospace',
@@ -674,17 +669,17 @@ SUCCESS: ✓ Full attractor from X-only input!'''
 
 
 def main():
-    """Main function to demonstrate corrected X-only manifold reconstruction"""
-    print("=== X-ONLY MANIFOLD RECONSTRUCTION (CORRECTED VERSION) ===")
-    print("This demonstrates the correct approach with latent shape (B, D, L)")
-    print("where D is network-determined and L is compressed signal length.")
+    """Main function to demonstrate X-only manifold reconstruction with direct signals"""
+    print("=== X-ONLY MANIFOLD RECONSTRUCTION (DIRECT SIGNAL VERSION) ===")
+    print("This demonstrates the direct signal approach: Hankel → Direct Signal")
+    print("Pipeline: Input Hankel X → Latent (B, D, L) → Direct signals (X, Y, Z)")
     print()
     
     # Generate Lorenz attractor
     print("Generating Lorenz attractor...")
     traj, t = generate_lorenz_full(T=20.0, dt=0.01)
     
-    # Create reconstructor with corrected latent shape
+    # Create reconstructor with direct signal output
     reconstructor = XOnlyManifoldReconstructorCorrected(
         window_len=512,
         delay_embedding_dim=10,
@@ -709,13 +704,13 @@ def main():
     # Create visualization
     fig = reconstructor.visualize_reconstructed_manifold(
         original_attractor, reconstructed_attractor, metrics,
-        save_path='x_only_manifold_reconstruction_corrected.png'
+        save_path='x_only_manifold_reconstruction_direct_signal.png'
     )
     
     # Print final results
-    print(f"\n=== FINAL RESULTS (CORRECTED) ===")
+    print(f"\n=== FINAL RESULTS (DIRECT SIGNAL) ===")
     print(f"✅ SUCCESS: Full Lorenz attractor reconstructed from X-only input!")
-    print(f"🎯 KEY INSIGHT: Using correct latent shape (B, D, L)")
+    print(f"🎯 KEY INSIGHT: Hankel → Direct Signal (bypasses Hankel reconstruction)")
     print(f"📊 Latent shape: {latent_all.shape}")
     print(f"🔗 X correlation: {metrics['correlations']['X']:.4f}")
     print(f"🔗 Y correlation: {metrics['correlations']['Y']:.4f}")

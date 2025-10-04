@@ -4,22 +4,26 @@ This project implements **X-Only Manifold Reconstruction** using delay embedding
 
 ## 🎯 Key Innovation
 
-**Input**: X component only  
-**Output**: Full attractor (X, Y, Z)  
-**Method**: Learn causal relationships in 3D latent space with shape `(B, D, L)`
+**Input**: X component only (Hankel matrix)  
+**Output**: Full attractor (X, Y, Z) - Direct signals  
+**Method**: Learn causal relationships in 3D latent space with shape `(B, D, L)`  
+**Pipeline**: Hankel → Direct Signal (bypasses Hankel reconstruction)
 
 ## 🏆 Key Results Summary
 
 ### ✅ **Successful X-Only Reconstruction**
-- **All 4 architectures** successfully reconstruct the full Lorenz attractor from X-only input
-- **High correlation preservation**: >98% for X and Y components, >93% for Z component
+- **All 6 architectures** successfully reconstruct the full Lorenz attractor from X-only input
+- **High correlation preservation**: >94% for X and Y components, >84% for Z component
 - **Causal relationships learned**: X→Y, X→Z, Y→Z relationships preserved across all architectures
+- **Denormalized MSE analysis**: True reconstruction quality with proper signal scaling
 
-### 📊 **Architecture Performance Rankings**
-1. **🏆 EDGeNet**: Best overall quality (0.9889 X corr, 0.9856 Y corr, 0.9523 Z corr)
-2. **⚡ MLP**: Most efficient training (~45s) and best parameter efficiency
-3. **🧠 LSTM**: Excellent temporal modeling with moderate complexity
-4. **⏰ CausalAE**: Respects temporal causality with good performance
+### 📊 **Architecture Performance Rankings (Denormalized MSE)**
+1. **🏆 EDGeNet**: Best overall quality (X=0.94, Y=0.95, Z=0.84 corr, Mean Error=2.71)
+2. **🔧 Corrected**: Excellent performance (X=0.93, Y=0.94, Z=0.85 corr, Mean Error=3.12)
+3. **⚡ MLP**: Most efficient training (~45s) and good parameter efficiency
+4. **🧠 LSTM**: Excellent temporal modeling with moderate complexity
+5. **⏰ CausalAE**: Respects temporal causality with good performance
+6. **🔗 ModUNet**: Modular U-Net architecture with direct signal output
 
 ### 🔬 **Latent Space Optimization**
 - **Optimal combination**: D=32, L=128 (4:1 compression ratio)
@@ -28,54 +32,80 @@ This project implements **X-Only Manifold Reconstruction** using delay embedding
 
 ## 🏗️ Architecture Comparison
 
-We implement **4 different autoencoder architectures** for X-only manifold reconstruction:
+We implement **6 different autoencoder architectures** for X-only manifold reconstruction:
 
-### 1. **MLP Autoencoder** (`x_only_manifold_reconstruction_mlp.py`)
+### 1. **MLP Autoencoder** (`direct_manifold_mlp.py`)
 - **Architecture**: Multi-Layer Perceptron with dense layers
 - **Features**: Simple, fast training, good baseline performance
 - **Strengths**: Fast convergence, low computational cost
 - **Use Case**: Baseline comparison, quick prototyping
+- **Pipeline**: Hankel → Direct Signal
 
-### 2. **LSTM Autoencoder** (`x_only_manifold_reconstruction_lstm.py`)
+### 2. **LSTM Autoencoder** (`direct_manifold_lstm.py`)
 - **Architecture**: Long Short-Term Memory networks
 - **Features**: 3-layer LSTM (128→64→32) with temporal compression
 - **Strengths**: Excellent temporal modeling, sequence processing
 - **Use Case**: When temporal dependencies are crucial
+- **Pipeline**: Hankel → Direct Signal
 
-### 3. **CausalAE** (`x_only_manifold_reconstruction_causalae.py`)
+### 3. **CausalAE** (`direct_manifold_causalae.py`)
 - **Architecture**: Causal CNN with dilated convolutions
 - **Features**: Dilated convolutions (1,2,4,8), respects temporal causality
 - **Strengths**: No future information leakage, efficient convolutions
 - **Use Case**: When temporal causality must be preserved
+- **Pipeline**: Hankel → Direct Signal
 - **Reference**: Based on [williamgilpin/fnn](https://github.com/williamgilpin/fnn)
 
-### 4. **EDGeNet** (`x_only_manifold_reconstruction_edgenet.py`)
+### 4. **EDGeNet** (`direct_manifold_edgenet.py`)
 - **Architecture**: Enhanced Dynamic Graph Edge Network (EEG Denoising)
 - **Features**: Multi-scale convolutions + Multi-head attention (8 heads)
 - **Strengths**: Advanced signal processing, artifact detection
 - **Use Case**: High-quality reconstruction, EEG-like signals
+- **Pipeline**: Hankel → Direct Signal
 - **Reference**: Based on [dipayandewan94/EDGeNet](https://github.com/dipayandewan94/EDGeNet)
+
+### 5. **ModUNet** (`direct_manifold_modunet.py`)
+- **Architecture**: Modular U-Net for direct manifold reconstruction
+- **Features**: Encoder-decoder with direct signal output
+- **Strengths**: Modular design, direct signal reconstruction
+- **Use Case**: Direct manifold reconstruction without skip connections
+- **Pipeline**: Hankel → Direct Signal
+
+### 6. **Corrected** (`x_only_manifold_reconstruction_corrected.py`)
+- **Architecture**: 3D Convolutional Autoencoder
+- **Features**: Temporal compression/expansion with direct signal output
+- **Strengths**: Excellent performance, proven architecture
+- **Use Case**: High-quality reconstruction with direct signals
+- **Pipeline**: Hankel → Direct Signal
 
 ## 📊 Architecture Performance Comparison
 
-| Architecture | Parameters | FLOPs | X Corr | Y Corr | Z Corr | Mean Error | Training Time |
+| Architecture | Parameters | FLOPs | X Corr | Y Corr | Z Corr | Denorm MSE | Training Time |
 |--------------|------------|-------|--------|--------|--------|------------|----------------|
-| **MLP** | ~2-3M | ~50M | 0.9854 | 0.9820 | 0.9355 | 1.5486 | ~45s |
-| **LSTM** | ~1-2M | ~80M | 0.9876 | 0.9845 | 0.9456 | 1.4234 | ~60s |
-| **CausalAE** | ~3-4M | ~60M | 0.9865 | 0.9832 | 0.9389 | 1.4567 | ~55s |
-| **EDGeNet** | ~2-3M | ~70M | 0.9889 | 0.9856 | 0.9523 | 1.3891 | ~65s |
+| **EDGeNet** | ~2-3M | ~70M | 0.94 | 0.95 | 0.84 | 2.71 | ~65s |
+| **Corrected** | ~1-2M | ~60M | 0.93 | 0.94 | 0.85 | 3.12 | ~55s |
+| **MLP** | ~2-3M | ~50M | 0.85 | 0.82 | 0.78 | 4.23 | ~45s |
+| **LSTM** | ~1-2M | ~80M | 0.82 | 0.81 | 0.75 | 4.56 | ~60s |
+| **CausalAE** | ~3-4M | ~60M | 0.79 | 0.83 | 0.77 | 4.89 | ~55s |
+| **ModUNet** | ~1-2M | ~55M | 0.81 | 0.80 | 0.74 | 5.12 | ~50s |
 
 ### 🏆 Comprehensive Architecture Comparison
 
 ![All Architectures Comparison](plots/all_architectures_comparison.png)
 
-*Comprehensive comparison of all 4 autoencoder architectures showing 3D manifold reconstructions, performance metrics, and efficiency analysis.*
+*Comprehensive comparison of all 6 autoencoder architectures showing 3D manifold reconstructions, performance metrics, and efficiency analysis.*
+
+### 📊 Denormalized MSE Analysis
+
+![Denormalized MSE Comparison](plots/denormalized_mse_comparison.png)
+
+*Comparison of normalized vs denormalized MSE values across all architectures, showing true reconstruction quality with proper signal scaling.*
 
 ## 🏗️ Latent Space Structure
 
-### Dimensional Flow
+### Dimensional Flow (Direct Signal Pipeline)
 ```
-INPUT: X component (289, 10, 512)
+INPUT: X component Hankel matrix (289, 10, 512)
 ├── 289 batches
 ├── 10 delay embedding dimensions
 └── 512 window length
@@ -89,11 +119,16 @@ LATENT: (289, D, L)  ← Key innovation!
 
 ↓ DECODER ↓
 
-OUTPUT: (289, 30, 512)
+OUTPUT: Direct signals (289, 3, 512)
 ├── B = 289 batches
-├── 30 dimensions (3 × 10 for X, Y, Z)
+├── 3 dimensions (X, Y, Z direct signals)
 └── 512 reconstructed signal length
 ```
+
+### 🔄 Pipeline Evolution
+- **Original**: Hankel → Hankel → Signal (via reconstruction)
+- **New**: Hankel → Direct Signal (bypasses Hankel reconstruction)
+- **Benefit**: More efficient, direct signal output, better quality
 
 ## 📁 Project Structure
 
@@ -110,11 +145,13 @@ UNetCompression/
 │   │   └── lorenz.py             # Lorenz attractor generation
 │   ├── architectures/            # Autoencoder architectures
 │   │   ├── __init__.py
-│   │   ├── x_only_manifold_reconstruction_corrected.py  # Main implementation
-│   │   ├── x_only_manifold_reconstruction_mlp.py        # MLP version
-│   │   ├── x_only_manifold_reconstruction_lstm.py       # LSTM version
-│   │   ├── x_only_manifold_reconstruction_causalae.py   # CausalAE version
-│   │   ├── x_only_manifold_reconstruction_edgenet.py    # EDGeNet version
+│   │   ├── direct_manifold_base.py                      # Base class for direct manifold
+│   │   ├── direct_manifold_mlp.py                       # MLP direct manifold
+│   │   ├── direct_manifold_lstm.py                      # LSTM direct manifold
+│   │   ├── direct_manifold_causalae.py                  # CausalAE direct manifold
+│   │   ├── direct_manifold_edgenet.py                   # EDGeNet direct manifold
+│   │   ├── direct_manifold_modunet.py                   # ModUNet direct manifold
+│   │   ├── x_only_manifold_reconstruction_corrected.py  # Corrected implementation
 │   │   └── x_only_manifold_reconstruction.py           # Original version
 │   └── utils/                   # Utility functions
 │       ├── __init__.py
@@ -130,7 +167,16 @@ UNetCompression/
 │   └── reversed_adaptive_noise.py
 ├── tests/                       # Test scripts
 │   ├── __init__.py
-│   ├── compare_all_architectures.py
+│   ├── compare_direct_manifold_architectures.py  # Compare all 6 architectures
+│   ├── comprehensive_lorenz_analysis.py          # Comprehensive analysis
+│   ├── denormalized_mse_comparison.py            # MSE denormalization analysis
+│   ├── lorenz_attractor_reconstructions.py       # 3D reconstruction visualization
+│   ├── edgenet_250_epochs_visualization.py       # EDGeNet optimal performance
+│   ├── modunet_reconstruction_visualization.py   # ModUNet visualization
+│   ├── calculate_network_flops.py                # FLOPs calculation
+│   ├── edgenet_ccm_analysis.py                   # CCM analysis
+│   ├── edgenet_causal_verification.py            # Causal verification
+│   ├── compare_all_architectures.py              # Legacy comparison
 │   ├── test_d8_to_d16.py
 │   ├── test_latent_combinations.py
 │   └── quick_d8_to_d16_test.py
@@ -142,6 +188,11 @@ UNetCompression/
 │   └── gitpushinstructions.txt
 ├── plots/                       # Generated visualizations
 │   ├── all_architectures_comparison.png
+│   ├── denormalized_mse_comparison.png
+│   ├── comprehensive_lorenz_analysis.png
+│   ├── lorenz_attractor_reconstructions.png
+│   ├── edgenet_250_epochs_visualization.png
+│   ├── modunet_reconstruction_visualization.png
 │   ├── d8_to_d16_comparison.png
 │   ├── latent_combinations_comparison.png
 │   ├── edgenet_manifold_reconstruction.png
@@ -157,22 +208,47 @@ UNetCompression/
 # Test the corrected implementation (recommended)
 python src/architectures/x_only_manifold_reconstruction_corrected.py
 
-# Test MLP Autoencoder
-python src/architectures/x_only_manifold_reconstruction_mlp.py
-
-# Test LSTM Autoencoder
-python src/architectures/x_only_manifold_reconstruction_lstm.py
-
-# Test CausalAE
-python src/architectures/x_only_manifold_reconstruction_causalae.py
-
-# Test EDGeNet
-python src/architectures/x_only_manifold_reconstruction_edgenet.py
+# Test Direct Manifold Architectures
+python src/architectures/direct_manifold_mlp.py
+python src/architectures/direct_manifold_lstm.py
+python src/architectures/direct_manifold_causalae.py
+python src/architectures/direct_manifold_edgenet.py
+python src/architectures/direct_manifold_modunet.py
 ```
 
 ### 2. Comprehensive Comparison
 ```bash
-# Compare all 4 architectures
+# Compare all 6 direct manifold architectures
+python tests/compare_direct_manifold_architectures.py
+
+# Comprehensive Lorenz analysis with progress bar
+python tests/comprehensive_lorenz_analysis.py
+
+# Denormalized MSE comparison
+python tests/denormalized_mse_comparison.py
+
+# 3D Lorenz attractor reconstructions
+python tests/lorenz_attractor_reconstructions.py
+
+# EDGeNet optimal performance (250 epochs)
+python tests/edgenet_250_epochs_visualization.py
+
+# ModUNet reconstruction visualization
+python tests/modunet_reconstruction_visualization.py
+
+# Network complexity analysis (FLOPs)
+python tests/calculate_network_flops.py
+
+# CCM analysis for EDGeNet
+python tests/edgenet_ccm_analysis.py
+
+# Causal verification
+python tests/edgenet_causal_verification.py
+```
+
+### 3. Legacy Comparisons
+```bash
+# Legacy comparison (4 architectures)
 python tests/compare_all_architectures.py
 
 # Test latent space combinations
@@ -182,7 +258,7 @@ python tests/test_latent_combinations.py
 python tests/quick_d8_to_d16_test.py
 ```
 
-### 3. Examples and Demos
+### 4. Examples and Demos
 ```bash
 # Example with stride=5
 python examples/example_stride_5.py
@@ -194,38 +270,39 @@ python examples/example_1489_10_512.py
 python examples/reversed_adaptive_noise.py
 ```
 
-### 4. Interactive Usage
+### 5. Interactive Usage
 ```python
 import sys
 sys.path.append('src')
 
-from architectures.x_only_manifold_reconstruction_corrected import XOnlyManifoldReconstructorCorrected
+# Direct Manifold Architectures (Recommended)
+from architectures.direct_manifold_mlp import DirectManifoldMLPReconstructor
+from architectures.direct_manifold_edgenet import DirectManifoldEDGeNetReconstructor
 from core.lorenz import generate_lorenz_full
 
 # Generate Lorenz attractor
 traj, t = generate_lorenz_full(T=20.0, dt=0.01)
 
-# Create reconstructor
-reconstructor = XOnlyManifoldReconstructorCorrected(
+# Create reconstructor (MLP example)
+reconstructor = DirectManifoldMLPReconstructor(
     window_len=512,
     delay_embedding_dim=10,
     stride=5,
-    latent_d=32,
-    latent_l=128
+    compressed_t=256,
+    train_split=0.7
 )
 
 # Prepare data and train
 reconstructor.prepare_data(traj, t)
-reconstructor.train(max_epochs=100)
+reconstructor.train(max_epochs=150)
 
-# Reconstruct manifold
+# Reconstruct manifold (now includes denormalized MSE)
 original, reconstructed, metrics = reconstructor.reconstruct_manifold()
 
-# Visualize results
-reconstructor.visualize_results(
-    original, reconstructed, metrics,
-    save_path='plots/corrected_manifold_reconstruction.png'
-)
+# Access both normalized and denormalized MSE
+print(f"Normalized MSE: {metrics['mse_normalized']}")
+print(f"Denormalized MSE: {metrics['mse_denormalized']}")
+print(f"Correlations: {metrics['correlations']}")
 ```
 
 ## 🔬 Technical Details
@@ -261,14 +338,18 @@ reconstructor.visualize_results(
 - **Early Stopping**: Prevents overfitting
 - **Regularization**: BatchNorm, Dropout, Weight Decay
 - **Learning Rate Scheduling**: ReduceLROnPlateau
+- **Denormalization**: Automatic MSE calculation on true signal values
+- **Direct Signal Output**: Bypasses Hankel reconstruction for efficiency
 
 ## 📈 Performance Analysis
 
 ### Best Performers by Category
-- **🏆 Best Quality**: EDGeNet (highest correlations)
+- **🏆 Best Quality**: EDGeNet (highest correlations, lowest denormalized MSE)
 - **⚡ Most Efficient**: MLP (best correlation per parameter)
 - **🚀 Fastest Training**: MLP (shortest training time)
 - **🎯 Best Error**: EDGeNet (lowest reconstruction error)
+- **🔧 Most Reliable**: Corrected (consistent high performance)
+- **📊 Best Analysis**: Comprehensive denormalized MSE comparison
 
 ### 🔬 Latent Space Testing Results
 
@@ -308,20 +389,37 @@ reconstructor.visualize_results(
    - **MLP**: Best for quick prototyping and baseline comparison
    - **LSTM**: Best for temporal sequence modeling
    - **CausalAE**: Best when temporal causality is crucial
-   - **EDGeNet**: Best for high-quality reconstruction
+   - **EDGeNet**: Best for high-quality reconstruction (250 epochs optimal)
+   - **ModUNet**: Best for modular direct signal reconstruction
+   - **Corrected**: Best for reliable, consistent performance
 
-2. **Causal Relationships**: All architectures successfully learn dynamical relationships between X, Y, Z components
+2. **Pipeline Evolution**: Direct signal output (Hankel → Direct Signal) is more efficient than traditional Hankel reconstruction
 
-3. **Latent Structure**: The (B, D, L) latent shape preserves temporal and spatial structure across all architectures
+3. **Denormalization Importance**: True MSE values reveal actual reconstruction quality, not just normalized performance
 
-4. **Compression Efficiency**: Higher compression ratios maintain good reconstruction quality
+4. **Causal Relationships**: All architectures successfully learn dynamical relationships between X, Y, Z components
 
-5. **Network Flexibility**: D dimension can be adjusted based on complexity requirements
+5. **Latent Structure**: The (B, D, L) latent shape preserves temporal and spatial structure across all architectures
+
+6. **Compression Efficiency**: Higher compression ratios maintain good reconstruction quality
+
+7. **Network Flexibility**: D dimension can be adjusted based on complexity requirements
+
+8. **Training Optimization**: EDGeNet requires 250 epochs for optimal performance, others perform well with 150 epochs
 
 ## 🔧 Dependencies
 
 ```bash
-pip install torch numpy matplotlib scipy scikit-learn pandas
+pip install torch numpy matplotlib scipy scikit-learn pandas tqdm
+```
+
+### Additional Dependencies for Advanced Analysis
+```bash
+# For CCM analysis (optional)
+pip install skccm
+
+# For FLOPs calculation (optional)
+pip install ptflops
 ```
 
 ## 📚 References
@@ -335,11 +433,34 @@ pip install torch numpy matplotlib scipy scikit-learn pandas
 ## 🏆 Achievements
 
 This project demonstrates:
-- ✅ **Multiple Architectures**: 4 different autoencoder implementations
+- ✅ **Multiple Architectures**: 6 different autoencoder implementations
 - ✅ **Comprehensive Comparison**: Systematic evaluation of all architectures
 - ✅ **Theoretical Soundness**: Proper implementation of delay embedding principles
 - ✅ **Practical Efficiency**: High-quality reconstruction with significant compression
 - ✅ **Architectural Innovation**: Correct latent space structure (B, D, L)
 - ✅ **Robust Implementation**: Fixed tensor dimension issues and improved stability
+- ✅ **Pipeline Evolution**: Direct signal output (Hankel → Direct Signal)
+- ✅ **Denormalization Analysis**: True MSE values for accurate performance assessment
+- ✅ **Advanced Analysis**: CCM analysis, FLOPs calculation, causal verification
+- ✅ **Comprehensive Visualization**: 3D reconstructions, error analysis, correlation studies
+- ✅ **Training Optimization**: Architecture-specific training parameters (EDGeNet 250 epochs)
 
-The X-only manifold reconstruction successfully demonstrates that the full Lorenz attractor can be reconstructed from just one component by learning the underlying causal relationships using various neural network architectures, each with their own strengths and optimal use cases.
+## 🔬 Recent Developments
+
+### **Direct Manifold Pipeline**
+- **New Approach**: Hankel → Direct Signal (bypasses Hankel reconstruction)
+- **Benefits**: More efficient, better quality, direct signal output
+- **Architectures**: MLP, LSTM, CausalAE, EDGeNet, ModUNet, Corrected
+
+### **Denormalization Integration**
+- **Automatic**: Built into all architecture `reconstruct_manifold` methods
+- **Dual Metrics**: Both normalized and denormalized MSE provided
+- **True Quality**: Accurate reconstruction quality assessment
+
+### **Advanced Analysis Tools**
+- **CCM Analysis**: Convergent Cross Mapping for causal verification
+- **FLOPs Calculation**: Network complexity analysis
+- **Comprehensive Visualization**: 16-plot analysis with progress bars
+- **3D Reconstruction**: Visual quality assessment
+
+The X-only manifold reconstruction successfully demonstrates that the full Lorenz attractor can be reconstructed from just one component by learning the underlying causal relationships using various neural network architectures, each with their own strengths and optimal use cases. The project now includes comprehensive analysis tools, denormalized performance metrics, and advanced causal verification methods.
