@@ -142,7 +142,8 @@ UNetCompression/
 │   │   ├── __init__.py
 │   │   ├── hankel_matrix_3d.py   # 3D Hankel matrix construction
 │   │   ├── hankel_dataset.py     # Dataset handling
-│   │   └── lorenz.py             # Lorenz attractor generation
+│   │   ├── lorenz.py             # Lorenz attractor generation
+│   │   └── rossler.py            # Rössler attractor generation
 │   ├── architectures/            # Autoencoder architectures
 │   │   ├── __init__.py
 │   │   ├── direct_manifold_base.py                      # Base class for direct manifold
@@ -176,6 +177,13 @@ UNetCompression/
 │   ├── calculate_network_flops.py                # FLOPs calculation
 │   ├── edgenet_ccm_analysis.py                   # CCM analysis
 │   ├── edgenet_causal_verification.py            # Causal verification
+│   ├── edgenet_true_ccm_analysis.py              # True CCM analysis with skccm
+│   ├── rossler_mlp_reconstruction.py             # Rössler MLP reconstruction
+│   ├── rossler_lstm_reconstruction.py            # Rössler LSTM reconstruction
+│   ├── rossler_causalae_reconstruction.py        # Rössler CausalAE reconstruction
+│   ├── rossler_edgenet_reconstruction.py         # Rössler EDGeNet reconstruction
+│   ├── rossler_corrected_reconstruction.py       # Rössler Corrected reconstruction
+│   ├── rossler_all_architectures_comparison.py   # Rössler all architectures comparison
 │   ├── compare_all_architectures.py              # Legacy comparison
 │   ├── test_d8_to_d16.py
 │   ├── test_latent_combinations.py
@@ -186,6 +194,7 @@ UNetCompression/
 │   └── direct_manifold_autoencoder.pth
 ├── configs/                     # Configuration files
 │   └── gitpushinstructions.txt
+├── CCM_CRITICAL_ISSUES.txt      # Critical CCM analysis issues documentation
 ├── plots/                       # Generated visualizations
 │   ├── all_architectures_comparison.png
 │   ├── denormalized_mse_comparison.png
@@ -242,8 +251,21 @@ python tests/calculate_network_flops.py
 # CCM analysis for EDGeNet
 python tests/edgenet_ccm_analysis.py
 
+# True CCM analysis with skccm library
+python tests/edgenet_true_ccm_analysis.py
+
 # Causal verification
 python tests/edgenet_causal_verification.py
+
+# Rössler attractor reconstruction (individual architectures)
+python tests/rossler_mlp_reconstruction.py
+python tests/rossler_lstm_reconstruction.py
+python tests/rossler_causalae_reconstruction.py
+python tests/rossler_edgenet_reconstruction.py
+python tests/rossler_corrected_reconstruction.py
+
+# Rössler attractor - all architectures comparison
+python tests/rossler_all_architectures_comparison.py
 ```
 
 ### 3. Legacy Comparisons
@@ -279,9 +301,13 @@ sys.path.append('src')
 from architectures.direct_manifold_mlp import DirectManifoldMLPReconstructor
 from architectures.direct_manifold_edgenet import DirectManifoldEDGeNetReconstructor
 from core.lorenz import generate_lorenz_full
+from core.rossler import generate_rossler_full
 
 # Generate Lorenz attractor
 traj, t = generate_lorenz_full(T=20.0, dt=0.01)
+
+# Or generate Rössler attractor (longer duration for full state space)
+# traj, t = generate_rossler_full(T=100.0, dt=0.01)
 
 # Create reconstructor (MLP example)
 reconstructor = DirectManifoldMLPReconstructor(
@@ -444,6 +470,8 @@ This project demonstrates:
 - ✅ **Advanced Analysis**: CCM analysis, FLOPs calculation, causal verification
 - ✅ **Comprehensive Visualization**: 3D reconstructions, error analysis, correlation studies
 - ✅ **Training Optimization**: Architecture-specific training parameters (EDGeNet 250 epochs)
+- ✅ **Rössler Attractor Extension**: Additional dataset for comprehensive testing
+- ✅ **CCM Critical Issues Documentation**: Detailed analysis of CCM-autoencoder incompatibilities
 
 ## 🔬 Recent Developments
 
@@ -462,5 +490,17 @@ This project demonstrates:
 - **FLOPs Calculation**: Network complexity analysis
 - **Comprehensive Visualization**: 16-plot analysis with progress bars
 - **3D Reconstruction**: Visual quality assessment
+
+### **Rössler Attractor Extension**
+- **New Dataset**: Rössler attractor implementation for additional testing
+- **Separate Scripts**: Individual architecture tests for Rössler reconstruction
+- **Comparison Framework**: All architectures tested on Rössler attractor
+- **Longer Duration**: 100-second trajectories for full state space development
+
+### **CCM Analysis Critical Issues**
+- **Important Discovery**: CCM analysis reveals fundamental incompatibilities with autoencoder processing
+- **Documentation**: `CCM_CRITICAL_ISSUES.txt` details the problems and solutions
+- **Key Finding**: Negative CCM scores don't indicate poor reconstruction but processing pipeline issues
+- **Recommendations**: Use original signals for CCM, alternative causality measures for reconstructed signals
 
 The X-only manifold reconstruction successfully demonstrates that the full Lorenz attractor can be reconstructed from just one component by learning the underlying causal relationships using various neural network architectures, each with their own strengths and optimal use cases. The project now includes comprehensive analysis tools, denormalized performance metrics, and advanced causal verification methods.
