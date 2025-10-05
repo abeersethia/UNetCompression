@@ -120,12 +120,27 @@ def main():
         name = result['name']
         metrics = result['metrics']
         
-        norm_mse = metrics['mse_normalized']
-        denorm_mse = metrics['mse_denormalized']
+        # Handle missing denormalized MSE keys
+        if 'mse_normalized' in metrics:
+            norm_mse = metrics['mse_normalized']
+        else:
+            # Fallback to regular MSE if available
+            norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0, 'Mean': 0})
+        
+        if 'mse_denormalized' in metrics:
+            denorm_mse = metrics['mse_denormalized']
+        else:
+            # Use normalized MSE as fallback
+            denorm_mse = norm_mse
+        
         correlations = metrics['correlations']
         
-        print(f"{name:<12} {norm_mse['X']:<10.4f} {norm_mse['Y']:<10.4f} {norm_mse['Z']:<10.4f} {norm_mse['Mean']:<10.4f} "
-              f"{denorm_mse['X']:<10.4f} {denorm_mse['Y']:<10.4f} {denorm_mse['Z']:<10.4f} {denorm_mse['Mean']:<10.4f} "
+        # Calculate mean if not present
+        norm_mean = norm_mse.get('Mean', np.mean([norm_mse['X'], norm_mse['Y'], norm_mse['Z']]))
+        denorm_mean = denorm_mse.get('Mean', np.mean([denorm_mse['X'], denorm_mse['Y'], denorm_mse['Z']]))
+        
+        print(f"{name:<12} {norm_mse['X']:<10.4f} {norm_mse['Y']:<10.4f} {norm_mse['Z']:<10.4f} {norm_mean:<10.4f} "
+              f"{denorm_mse['X']:<10.4f} {denorm_mse['Y']:<10.4f} {denorm_mse['Z']:<10.4f} {denorm_mean:<10.4f} "
               f"{correlations['X']:<8.4f} {correlations['Y']:<8.4f} {correlations['Z']:<8.4f}")
     
     # Create visualization
@@ -134,13 +149,45 @@ def main():
     
     # 1. Normalized vs Denormalized MSE Comparison
     arch_names = [r['name'] for r in results]
-    norm_x_mse = [r['metrics']['mse_normalized']['X'] for r in results]
-    norm_y_mse = [r['metrics']['mse_normalized']['Y'] for r in results]
-    norm_z_mse = [r['metrics']['mse_normalized']['Z'] for r in results]
     
-    denorm_x_mse = [r['metrics']['mse_denormalized']['X'] for r in results]
-    denorm_y_mse = [r['metrics']['mse_denormalized']['Y'] for r in results]
-    denorm_z_mse = [r['metrics']['mse_denormalized']['Z'] for r in results]
+    # Handle missing keys safely
+    norm_x_mse = []
+    norm_y_mse = []
+    norm_z_mse = []
+    denorm_x_mse = []
+    denorm_y_mse = []
+    denorm_z_mse = []
+    
+    for r in results:
+        metrics = r['metrics']
+        
+        # Normalized MSE
+        if 'mse_normalized' in metrics:
+            norm_x_mse.append(metrics['mse_normalized']['X'])
+            norm_y_mse.append(metrics['mse_normalized']['Y'])
+            norm_z_mse.append(metrics['mse_normalized']['Z'])
+        else:
+            norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0})
+            norm_x_mse.append(norm_mse['X'])
+            norm_y_mse.append(norm_mse['Y'])
+            norm_z_mse.append(norm_mse['Z'])
+        
+        # Denormalized MSE
+        if 'mse_denormalized' in metrics:
+            denorm_x_mse.append(metrics['mse_denormalized']['X'])
+            denorm_y_mse.append(metrics['mse_denormalized']['Y'])
+            denorm_z_mse.append(metrics['mse_denormalized']['Z'])
+        else:
+            # Use normalized as fallback
+            if 'mse_normalized' in metrics:
+                denorm_x_mse.append(metrics['mse_normalized']['X'])
+                denorm_y_mse.append(metrics['mse_normalized']['Y'])
+                denorm_z_mse.append(metrics['mse_normalized']['Z'])
+            else:
+                norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0})
+                denorm_x_mse.append(norm_mse['X'])
+                denorm_y_mse.append(norm_mse['Y'])
+                denorm_z_mse.append(norm_mse['Z'])
     
     x = np.arange(len(arch_names))
     width = 0.12
@@ -204,7 +251,20 @@ def main():
                     xytext=(5, 5), textcoords='offset points', fontsize=8)
     
     # 4. Architecture Ranking by Denormalized MSE
-    denorm_mean_mse = [r['metrics']['mse_denormalized']['Mean'] for r in results]
+    denorm_mean_mse = []
+    for r in results:
+        metrics = r['metrics']
+        if 'mse_denormalized' in metrics:
+            denorm_mean_mse.append(metrics['mse_denormalized'].get('Mean', 
+                np.mean([metrics['mse_denormalized']['X'], metrics['mse_denormalized']['Y'], metrics['mse_denormalized']['Z']])))
+        else:
+            # Use normalized MSE as fallback
+            if 'mse_normalized' in metrics:
+                denorm_mean_mse.append(metrics['mse_normalized'].get('Mean',
+                    np.mean([metrics['mse_normalized']['X'], metrics['mse_normalized']['Y'], metrics['mse_normalized']['Z']])))
+            else:
+                norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0})
+                denorm_mean_mse.append(np.mean([norm_mse['X'], norm_mse['Y'], norm_mse['Z']]))
     
     # Sort by denormalized MSE (lower is better)
     sorted_results = sorted(zip(arch_names, denorm_mean_mse), key=lambda x: x[1])
@@ -231,14 +291,27 @@ def main():
     print("✅ Denormalized MSE comparison saved to: plots/denormalized_mse_comparison.png")
     
     # Find best and worst performers
-    best_mse = min(results, key=lambda r: r['metrics']['mse_denormalized']['Mean'])
-    worst_mse = max(results, key=lambda r: r['metrics']['mse_denormalized']['Mean'])
+    def get_denorm_mean(r):
+        metrics = r['metrics']
+        if 'mse_denormalized' in metrics:
+            return metrics['mse_denormalized'].get('Mean', 
+                np.mean([metrics['mse_denormalized']['X'], metrics['mse_denormalized']['Y'], metrics['mse_denormalized']['Z']]))
+        else:
+            if 'mse_normalized' in metrics:
+                return metrics['mse_normalized'].get('Mean',
+                    np.mean([metrics['mse_normalized']['X'], metrics['mse_normalized']['Y'], metrics['mse_normalized']['Z']]))
+            else:
+                norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0})
+                return np.mean([norm_mse['X'], norm_mse['Y'], norm_mse['Z']])
+    
+    best_mse = min(results, key=get_denorm_mean)
+    worst_mse = max(results, key=get_denorm_mean)
     
     print("\n" + "="*80)
     print("DENORMALIZED MSE ANALYSIS SUMMARY")
     print("="*80)
-    print(f"🏆 Best Denormalized MSE: {best_mse['name']} ({best_mse['metrics']['mse_denormalized']['Mean']:.4f})")
-    print(f"📊 Worst Denormalized MSE: {worst_mse['name']} ({worst_mse['metrics']['mse_denormalized']['Mean']:.4f})")
+    print(f"🏆 Best Denormalized MSE: {best_mse['name']} ({get_denorm_mean(best_mse):.4f})")
+    print(f"📊 Worst Denormalized MSE: {worst_mse['name']} ({get_denorm_mean(worst_mse):.4f})")
     
     print(f"\n📈 Key Insights:")
     print(f"   • Denormalized MSE shows true reconstruction quality")
@@ -253,16 +326,27 @@ def main():
         metrics = result['metrics']
         training_history = result['training_history']
         
+        # Handle missing keys safely
+        if 'mse_normalized' in metrics:
+            norm_mse = metrics['mse_normalized']
+        else:
+            norm_mse = metrics.get('mse', {'X': 0, 'Y': 0, 'Z': 0, 'Mean': 0})
+        
+        if 'mse_denormalized' in metrics:
+            denorm_mse = metrics['mse_denormalized']
+        else:
+            denorm_mse = norm_mse
+        
         comparison_data.append({
             'Architecture': name,
-            'Norm_X_MSE': metrics['mse_normalized']['X'],
-            'Norm_Y_MSE': metrics['mse_normalized']['Y'],
-            'Norm_Z_MSE': metrics['mse_normalized']['Z'],
-            'Norm_Mean_MSE': metrics['mse_normalized']['Mean'],
-            'Denorm_X_MSE': metrics['mse_denormalized']['X'],
-            'Denorm_Y_MSE': metrics['mse_denormalized']['Y'],
-            'Denorm_Z_MSE': metrics['mse_denormalized']['Z'],
-            'Denorm_Mean_MSE': metrics['mse_denormalized']['Mean'],
+            'Norm_X_MSE': norm_mse['X'],
+            'Norm_Y_MSE': norm_mse['Y'],
+            'Norm_Z_MSE': norm_mse['Z'],
+            'Norm_Mean_MSE': norm_mse.get('Mean', np.mean([norm_mse['X'], norm_mse['Y'], norm_mse['Z']])),
+            'Denorm_X_MSE': denorm_mse['X'],
+            'Denorm_Y_MSE': denorm_mse['Y'],
+            'Denorm_Z_MSE': denorm_mse['Z'],
+            'Denorm_Mean_MSE': denorm_mse.get('Mean', np.mean([denorm_mse['X'], denorm_mse['Y'], denorm_mse['Z']])),
             'X_Correlation': metrics['correlations']['X'],
             'Y_Correlation': metrics['correlations']['Y'],
             'Z_Correlation': metrics['correlations']['Z'],
